@@ -105,9 +105,20 @@ After all Packer image builds are complete, remove the role and instance profile
 
 ```bash
 profile="mds-devsecops-lab"
+operator_role="project-3-packer-operator-role"
+operator_policy="project-3-packer-operator-policy"
 role="project-3-packer-builder-role"
 instance_profile="project-3-packer-builder-profile"
 policy_arn="arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+
+aws iam delete-role-policy \
+  --role-name "$operator_role" \
+  --policy-name "$operator_policy" \
+  --profile "$profile"
+
+aws iam delete-role \
+  --role-name "$operator_role" \
+  --profile "$profile"
 
 aws iam remove-role-from-instance-profile \
   --instance-profile-name "$instance_profile" \
