@@ -1,0 +1,3 @@
+AMI ID: ami-013a7d409602d2e81
+AWS Region: us-east-1
+Built from base AMI: ami-0d6dd9e8265d48906
