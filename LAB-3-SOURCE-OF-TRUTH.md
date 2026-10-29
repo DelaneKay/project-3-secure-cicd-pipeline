@@ -19,13 +19,14 @@ Juice Shop is intentionally vulnerable. Use test data, isolate the service, rest
 - **OWASP Dependency-Check**: software composition/dependency vulnerability scanning.
 - **OWASP ZAP**: DAST against the deployed Juice Shop lab URL only.
 - **Packer**: builds three versioned EC2 AMIs before Terraform deploys the lab.
+- **Temporary Packer builder IAM role and instance profile**: bootstrapped before image builds so temporary EC2 builders can register with Systems Manager. The role receives `AmazonSSMManagedInstanceCore`; the local IAM user may pass only this role to the Packer builder. Remove the role and profile during final cleanup after image builds.
 - **Terraform**: creates and destroys AWS lab infrastructure.
 - **Amazon RDS for PostgreSQL**: persistent SonarQube database.
 - **AWS Systems Manager (SSM)**: access/administration for EC2 hosts; no SSH or inbound SSH rules.
 - **CloudWatch and CloudWatch Agent**: pipeline scan summaries and relevant EC2 logs/metrics, plus alarms.
 - **Amazon SNS**: notifications when a scan reports findings; confirm the intended email subscription.
 
-**Explicitly out of scope:** GitHub-hosted runners, Ansible and an Ansible admin node, S3, and a separately planned EBS persistence design. RDS is the agreed persistent database service. No container scanner or deployment-blocking quality gates are included.
+**Explicitly out of scope:** GitHub-hosted runners, Ansible and an Ansible admin node, S3, and a separately planned EBS persistence design. RDS is the agreed persistent database service. No container scanner or deployment-blocking quality gates are included. No direct SSH access, inbound SSH rules, or SSH keys are used for deployed lab hosts. Packer's temporary image builder connects through an SSM tunnel that carries its SSH communicator; this does not expose port 22.
 
 ## Packer AMIs
 
@@ -53,32 +54,34 @@ For each boundary, define what crosses it, who may cross it, and which controls 
 6. **SonarQube EC2 → RDS PostgreSQL**: database queries and stored project/analysis data. Keep RDS private, allow only SonarQube as a client, and store credentials in Secrets Manager with narrowly scoped instance access.
 7. **EC2 hosts → AWS Systems Manager**: agent management traffic. Use instance roles with required SSM permissions and the required outbound path/endpoints; no SSH keys or inbound SSH.
 8. **Packer → temporary EC2 builder**: base image, build scripts, packages, and application configuration. Review/version templates; bake no secrets or persistent data; remove temporary builders.
-9. **Terraform workflow → AWS infrastructure**: API calls to create/update/destroy resources. Review code and plans, restrict IAM/state access, and handle RDS snapshot creation/deletion as explicit steps separate from Terraform destroy.
-10. **Lab users → Juice Shop**: HTTP(S) requests to an intentionally vulnerable application. Isolate it, restrict inbound traffic to lab users/scanners, and use test data only.
-11. **ZAP → Juice Shop**: active scan requests and responses. Authorize and limit the target to the lab URL.
-12. **Hosts and scan jobs → CloudWatch**: host logs and scan summaries. Send only necessary data, redact secrets/sensitive content, and restrict log access.
-13. **CloudWatch/workflow → SNS → lab operator**: scan notifications. Keep messages concise, never include secret values, restrict publishers/subscribers, and confirm the email subscription.
+9. **Packer operator IAM user → AWS APIs and temporary builder role**: the local `mds-devsecops-lab` profile authorizes Packer to launch builders, use SSM sessions, create AMIs, and pass only the dedicated builder role. Keep the builder role limited to SSM managed-instance permissions; do not embed the user's credentials in images or user data.
+10. **Terraform workflow → AWS infrastructure**: API calls to create/update/destroy resources. Review code and plans, restrict IAM/state access, and handle RDS snapshot creation/deletion as explicit steps separate from Terraform destroy.
+11. **Lab users → Juice Shop**: HTTP(S) requests to an intentionally vulnerable application. Isolate it, restrict inbound traffic to lab users/scanners, and use test data only.
+12. **ZAP → Juice Shop**: active scan requests and responses. Authorize and limit the target to the lab URL.
+13. **Hosts and scan jobs → CloudWatch**: host logs and scan summaries. Send only necessary data, redact secrets/sensitive content, and restrict log access.
+14. **CloudWatch/workflow → SNS → lab operator**: scan notifications. Keep messages concise, never include secret values, restrict publishers/subscribers, and confirm the email subscription.
 
 ## Implementation sequence
 
 1. **Prepare the repository.** Store the Packer templates, Terraform, workflow definitions, application deployment configuration, and supporting docs. Keep credentials out of source and AMIs.
-2. **Build the three AMIs with Packer.** Bake the patched OS, required hardening, SSM/CloudWatch agents, and each role's software. Verify versions and startup behavior. Packer removes temporary builders.
-3. **Configure GitHub OIDC and AWS IAM.** Restrict the trust relationship to the repository and approved deployment branch/environment; grant only required permissions.
-4. **Provision the lab with Terraform.** Create VPC/subnets, security groups, IAM roles, RDS PostgreSQL, CloudWatch log groups/alarms, SNS topic/subscription, and three EC2 roles from the AMIs: Juice Shop, SonarQube, and runner. Keep private services private and allow only required traffic.
-5. **Configure SonarQube.** Connect the SonarQube host to RDS using credentials fetched securely at runtime. Set up the project, quality profile, and project-scoped analysis token.
-6. **Register the disposable runner.** Launch from its AMI, register using a short-lived token supplied securely, allow only intended workflows, and verify private access to SonarQube. Do not use it as an admin node.
-7. **Use SSM for administration.** Confirm SSM Agent registration and access on EC2 hosts. Do not enable SSH.
-8. **Set up CloudWatch and SNS.** Configure CloudWatch Agent host logs/metrics where needed, create log groups, alarms, SNS topic and confirmed email subscription. Ensure messages never contain Gitleaks secret values.
-9. **Implement GitHub Actions scan jobs.** Run Gitleaks, SonarScanner, and Dependency-Check. Preserve reports and publish structured summaries (tool, commit, target, severity counts, timestamp, report reference) to CloudWatch; notify via SNS for findings.
-10. **Deploy the application.** Use the approved workflow and OIDC role to deploy/replace the Juice Shop EC2 from its Packer AMI via Terraform. No post-deployment configuration of the application host.
-11. **Run ZAP DAST.** Scan only the deployed lab URL. Upload/report results and publish CloudWatch/SNS summaries.
-12. **Keep findings report-only.** Vulnerabilities or secret findings do not fail the workflow or stop deployment. Report tool/infrastructure execution failures separately so they are not mistaken for clean scan results.
-13. **Review and document.** Review GitHub Actions summaries/artifacts, SonarQube profile results, Dependency-Check, ZAP, CloudWatch logs/alarms, SNS messages, Terraform output, and Packer AMI versions.
-14. **Snapshot, destroy, and clean up.** If demonstrating backup, manually create and verify an RDS snapshot before teardown. Run `terraform destroy` for Terraform-managed lab resources. Then separately delete the manual snapshot, Packer AMIs and backing snapshots, runner registration if still present, and other retained lab resources. Verify no billable lab resources remain. Packer and Terraform do not automatically perform this complete cleanup of each other's artifacts.
+2. **Bootstrap the Packer builder role and instance profile.** Before building AMIs, create a dedicated EC2 role trusted by `ec2.amazonaws.com`, attach only `AmazonSSMManagedInstanceCore`, and add it to an instance profile. Use the `mds-devsecops-lab` AWS CLI profile; it needs narrowly scoped EC2/Packer and SSM-session permissions plus `iam:PassRole` limited to this role. Do not use root credentials. This role is a build prerequisite because Terraform has not yet created the lab IAM resources.
+3. **Build the three AMIs with Packer.** Bake the patched OS, required hardening, SSM/CloudWatch agents, and each role's software. Verify versions and startup behavior. Use Packer's SSM tunnel for the temporary builder (no inbound SSH rule or key); Packer removes temporary builders.
+4. **Configure GitHub OIDC and AWS IAM.** Restrict the trust relationship to the repository and approved deployment branch/environment; grant only required permissions.
+5. **Provision the lab with Terraform.** Create VPC/subnets, security groups, IAM roles, RDS PostgreSQL, CloudWatch log groups/alarms, SNS topic/subscription, and three EC2 roles from the AMIs: Juice Shop, SonarQube, and runner. Keep private services private and allow only required traffic.
+6. **Configure SonarQube.** Connect the SonarQube host to RDS using credentials fetched securely at runtime. Set up the project, quality profile, and project-scoped analysis token.
+7. **Register the disposable runner.** Launch from its AMI, register using a short-lived token supplied securely, allow only intended workflows, and verify private access to SonarQube. Do not use it as an admin node.
+8. **Use SSM for administration.** Confirm SSM Agent registration and access on EC2 hosts. Do not enable inbound SSH or use SSH keys.
+9. **Set up CloudWatch and SNS.** Configure CloudWatch Agent host logs/metrics where needed, create log groups, alarms, SNS topic and confirmed email subscription. Ensure messages never contain Gitleaks secret values.
+10. **Implement GitHub Actions scan jobs.** Run Gitleaks, SonarScanner, and Dependency-Check. Preserve reports and publish structured summaries (tool, commit, target, severity counts, timestamp, report reference) to CloudWatch; notify via SNS for findings.
+11. **Deploy the application.** Use the approved workflow and OIDC role to deploy/replace the Juice Shop EC2 from its Packer AMI via Terraform. No post-deployment configuration of the application host.
+12. **Run ZAP DAST.** Scan only the deployed lab URL. Upload/report results and publish CloudWatch/SNS summaries.
+13. **Keep findings report-only.** Vulnerabilities or secret findings do not fail the workflow or stop deployment. Report tool/infrastructure execution failures separately so they are not mistaken for clean scan results.
+14. **Review and document.** Review GitHub Actions summaries/artifacts, SonarQube profile results, Dependency-Check, ZAP, CloudWatch logs/alarms, SNS messages, Terraform output, and Packer AMI versions.
+15. **Snapshot, destroy, and clean up.** If demonstrating backup, manually create and verify an RDS snapshot before teardown. Run `terraform destroy` for Terraform-managed lab resources. Then separately delete the manual snapshot, Packer AMIs and backing snapshots, runner registration if still present, the temporary Packer builder role and instance profile, and other retained lab resources. Verify no billable lab resources remain. Packer and Terraform do not automatically perform this complete cleanup of each other's artifacts.
 
 ## Expected AWS footprint
 
-When all services are running: **three EC2 instances** (Juice Shop, SonarQube, and the separate self-hosted runner) plus **one RDS PostgreSQL DB instance**. SonarQube and the runner may be stopped/removed between lab sessions as planned. Packer builders are temporary and removed after image creation. No Ansible admin node is part of the scope.
+When all services are running: **three EC2 instances** (Juice Shop, SonarQube, and the separate self-hosted runner) plus **one RDS PostgreSQL DB instance**. SonarQube and the runner may be stopped/removed between lab sessions as planned. Packer builders are temporary and removed after image creation. The Packer builder role/profile is a temporary IAM prerequisite, not an instance. No Ansible admin node is part of the scope.
 
 ## Change control
 
