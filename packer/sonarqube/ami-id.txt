@@ -1,0 +1,5 @@
+SonarQube AMI ID: ami-0176c8a1f9e4a7ce3
+AWS Region: us-east-1
+Base AMI ID: ami-0d6dd9e8265d48906
+SonarQube Community Build: 26.10.0.133078
+Backing EBS snapshot ID: snap-056dba1358e45bdd8
