@@ -41,6 +41,20 @@ Create the GitHub OIDC provider in account `273517699789`: issuer `https://token
 
 Give the plan role read-only access to the managed AWS services and state objects, plus S3 write/delete access only to the five state lock paths. Give the apply role only the actions represented by these Terraform roots, state read/write, lock read/write/delete, and `iam:PassRole` restricted to Project 3 instance roles with EC2 as the receiving service. Restrict S3 ListBucket to `project-3/*`. Do not attach `AdministratorAccess`.
 
+The apply role's inline permissions policy is bootstrapped separately from Terraform. After changing `iam/terraform-github-oidc/apply-permissions.json`, update the existing inline policy as the authenticated `mds-devsecops-lab` IAM user. Pull the latest `master` first, then run from the repository root:
+
+```bash
+aws sts get-caller-identity --profile mds-devsecops-lab --query Arn --output text
+
+aws iam put-role-policy \
+  --role-name project-3-terraform-apply-role \
+  --policy-name project-3-terraform-apply-policy \
+  --policy-document file://iam/terraform-github-oidc/apply-permissions.json \
+  --profile mds-devsecops-lab
+```
+
+Check the returned policy with `aws iam get-role-policy`. The next Terraform deployment must create a fresh plan from the current S3 state; do not reuse a saved plan from an apply that partially failed.
+
 Add these repository Actions variables:
 
 - `TF_STATE_BUCKET`: `project-3-tfstate-273517699789-us-east-1`
