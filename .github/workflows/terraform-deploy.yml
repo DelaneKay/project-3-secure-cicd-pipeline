@@ -5,6 +5,7 @@ on:
     branches: [master]
     paths:
       - "terraform/**"
+      - "iam/terraform-github-oidc/apply-permissions.json"
       - ".github/workflows/terraform-*.yml"
       - "docs/terraform-layering-rationale.md"
       - "LAB-3-SOURCE-OF-TRUTH.md"
