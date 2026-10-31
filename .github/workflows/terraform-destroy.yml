@@ -1,0 +1,86 @@
+name: Terraform destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type DESTROY to plan teardown of all lab infrastructure.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: project-3-terraform-deployment
+  cancel-in-progress: false
+
+jobs:
+  confirm:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require explicit destruction confirmation
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          if [[ "$CONFIRMATION" != "DESTROY" ]]; then
+            echo "Enter DESTROY to continue." >&2
+            exit 1
+          fi
+
+  sonarqube:
+    needs: confirm
+    uses: ./.github/workflows/terraform-layer.yml
+    with:
+      root: sonarqube
+      action: destroy
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      aws_region: us-east-1
+      plan_role_arn: ${{ vars.AWS_TERRAFORM_PLAN_ROLE_ARN }}
+      apply_role_arn: ${{ vars.AWS_TERRAFORM_APPLY_ROLE_ARN }}
+
+  compute:
+    needs: confirm
+    uses: ./.github/workflows/terraform-layer.yml
+    with:
+      root: compute
+      action: destroy
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      aws_region: us-east-1
+      plan_role_arn: ${{ vars.AWS_TERRAFORM_PLAN_ROLE_ARN }}
+      apply_role_arn: ${{ vars.AWS_TERRAFORM_APPLY_ROLE_ARN }}
+
+  database:
+    needs: [sonarqube, compute]
+    uses: ./.github/workflows/terraform-layer.yml
+    with:
+      root: database
+      action: destroy
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      aws_region: us-east-1
+      plan_role_arn: ${{ vars.AWS_TERRAFORM_PLAN_ROLE_ARN }}
+      apply_role_arn: ${{ vars.AWS_TERRAFORM_APPLY_ROLE_ARN }}
+
+  observability:
+    needs: [sonarqube, compute]
+    uses: ./.github/workflows/terraform-layer.yml
+    with:
+      root: observability
+      action: destroy
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      aws_region: us-east-1
+      plan_role_arn: ${{ vars.AWS_TERRAFORM_PLAN_ROLE_ARN }}
+      apply_role_arn: ${{ vars.AWS_TERRAFORM_APPLY_ROLE_ARN }}
+
+  network:
+    needs: [database, observability]
+    uses: ./.github/workflows/terraform-layer.yml
+    with:
+      root: network
+      action: destroy
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      aws_region: us-east-1
+      plan_role_arn: ${{ vars.AWS_TERRAFORM_PLAN_ROLE_ARN }}
+      apply_role_arn: ${{ vars.AWS_TERRAFORM_APPLY_ROLE_ARN }}

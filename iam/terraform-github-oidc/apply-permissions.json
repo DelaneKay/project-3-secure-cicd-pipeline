@@ -1,0 +1,342 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadTerraformStateBucketMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketLocation"
+      ],
+      "Resource": "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1"
+    },
+    {
+      "Sid": "ListTerraformStatePrefix",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "project-3/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ReadAndWriteTerraformStates",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/network/terraform.tfstate",
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/database/terraform.tfstate",
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/observability/terraform.tfstate",
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/compute/terraform.tfstate",
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/sonarqube/terraform.tfstate"
+      ]
+    },
+    {
+      "Sid": "ReadAndMaintainNativeTerraformLocks",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/network/terraform.tfstate.tflock",
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/database/terraform.tfstate.tflock",
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/observability/terraform.tfstate.tflock",
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/compute/terraform.tfstate.tflock",
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/sonarqube/terraform.tfstate.tflock"
+      ]
+    },
+    {
+      "Sid": "InspectTerraformManagedResources",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:Describe*",
+        "rds:Describe*",
+        "rds:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CreateTaggedLabNetworkResources",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateVpc",
+        "ec2:CreateSubnet",
+        "ec2:CreateInternetGateway",
+        "ec2:CreateRouteTable",
+        "ec2:CreateSecurityGroup",
+        "ec2:CreateTags"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "project-3-secure-cicd-pipeline",
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "CreateLabVpcEndpoints",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateVpcEndpoint"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1",
+          "aws:RequestTag/Project": "project-3-secure-cicd-pipeline"
+        }
+      }
+    },
+    {
+      "Sid": "LaunchApprovedLabInstanceTypes",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1",
+          "ec2:InstanceType": [
+            "t3.small",
+            "c7i-flex.large"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ModifyOrDeleteTaggedLabNetworkResources",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:ModifyVpcAttribute",
+        "ec2:DeleteVpc",
+        "ec2:ModifySubnetAttribute",
+        "ec2:DeleteSubnet",
+        "ec2:AttachInternetGateway",
+        "ec2:DetachInternetGateway",
+        "ec2:DeleteInternetGateway",
+        "ec2:CreateRoute",
+        "ec2:DeleteRoute",
+        "ec2:AssociateRouteTable",
+        "ec2:DisassociateRouteTable",
+        "ec2:DeleteRouteTable",
+        "ec2:ModifyVpcEndpoint",
+        "ec2:DeleteVpcEndpoints",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:AuthorizeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupEgress",
+        "ec2:DeleteSecurityGroup",
+        "ec2:TerminateInstances",
+        "ec2:DeleteTags"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1",
+          "ec2:ResourceTag/Project": "project-3-secure-cicd-pipeline"
+        }
+      }
+    },
+    {
+      "Sid": "ManageProjectRolesAndPolicies",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:PutRolePolicy",
+        "iam:GetRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies",
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion"
+      ],
+      "Resource": "arn:aws:iam::273517699789:role/project-3-secure-cicd-pipeline-*"
+    },
+    {
+      "Sid": "AttachOnlySSMManagedPolicyToLabRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy"
+      ],
+      "Resource": [
+        "arn:aws:iam::273517699789:role/project-3-secure-cicd-pipeline-*",
+        "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      ]
+    },
+    {
+      "Sid": "ManageProjectInstanceProfiles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateInstanceProfile",
+        "iam:DeleteInstanceProfile",
+        "iam:GetInstanceProfile",
+        "iam:AddRoleToInstanceProfile",
+        "iam:RemoveRoleFromInstanceProfile",
+        "iam:TagInstanceProfile",
+        "iam:UntagInstanceProfile"
+      ],
+      "Resource": [
+        "arn:aws:iam::273517699789:instance-profile/project-3-secure-cicd-pipeline-*",
+        "arn:aws:iam::273517699789:role/project-3-secure-cicd-pipeline-*"
+      ]
+    },
+    {
+      "Sid": "ListInstanceProfilesForProjectRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:ListInstanceProfilesForRole"
+      ],
+      "Resource": "arn:aws:iam::273517699789:role/project-3-secure-cicd-pipeline-*"
+    },
+    {
+      "Sid": "PassOnlyProjectRolesToEC2",
+      "Effect": "Allow",
+      "Action": [
+        "iam:PassRole"
+      ],
+      "Resource": "arn:aws:iam::273517699789:role/project-3-secure-cicd-pipeline-*",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "ec2.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "CreateRdsManagedMasterSecret",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:CreateSecret"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringLike": {
+          "secretsmanager:Name": "rds!*"
+        }
+      }
+    },
+    {
+      "Sid": "TagRdsManagedMasterSecret",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:TagResource"
+      ],
+      "Resource": "arn:aws:secretsmanager:us-east-1:273517699789:secret:rds!*"
+    },
+    {
+      "Sid": "DescribeSecretsManagerKey",
+      "Effect": "Allow",
+      "Action": [
+        "kms:DescribeKey"
+      ],
+      "Resource": "arn:aws:kms:us-east-1:273517699789:key/*",
+      "Condition": {
+        "ForAnyValue:StringEquals": {
+          "kms:ResourceAliases": "alias/aws/secretsmanager"
+        }
+      }
+    },
+    {
+      "Sid": "ManageOnlyProjectSonarDatabase",
+      "Effect": "Allow",
+      "Action": [
+        "rds:CreateDBInstance",
+        "rds:ModifyDBInstance",
+        "rds:DeleteDBInstance",
+        "rds:AddTagsToResource",
+        "rds:RemoveTagsFromResource",
+        "rds:CreateDBSubnetGroup",
+        "rds:ModifyDBSubnetGroup",
+        "rds:DeleteDBSubnetGroup"
+      ],
+      "Resource": [
+        "arn:aws:rds:us-east-1:273517699789:db:project-3-sonarqube",
+        "arn:aws:rds:us-east-1:273517699789:subgrp:project-3-secure-cicd-pipeline-sonarqube"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "CreateRdsServiceLinkedRoleIfNeeded",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateServiceLinkedRole"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "iam:AWSServiceName": "rds.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "ManageProjectLogGroups",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:PutRetentionPolicy",
+        "logs:DeleteRetentionPolicy",
+        "logs:ListTagsForResource",
+        "logs:TagResource",
+        "logs:UntagResource",
+        "logs:DescribeLogGroups"
+      ],
+      "Resource": "arn:aws:logs:us-east-1:273517699789:log-group:/project-3/*"
+    },
+    {
+      "Sid": "ManageProjectScanNotificationTopic",
+      "Effect": "Allow",
+      "Action": [
+        "sns:CreateTopic",
+        "sns:DeleteTopic",
+        "sns:GetTopicAttributes",
+        "sns:SetTopicAttributes",
+        "sns:TagResource",
+        "sns:UntagResource",
+        "sns:Subscribe",
+        "sns:Unsubscribe",
+        "sns:GetSubscriptionAttributes",
+        "sns:ListSubscriptionsByTopic",
+        "sns:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:sns:us-east-1:273517699789:project-3-secure-cicd-pipeline-scan-findings"
+    },
+    {
+      "Sid": "StoreEphemeralRunnerRegistrationToken",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:PutParameter"
+      ],
+      "Resource": "arn:aws:ssm:us-east-1:273517699789:parameter/project-3/github-runner/registration-token"
+    },
+    {
+      "Sid": "IdentifyCurrentAccount",
+      "Effect": "Allow",
+      "Action": [
+        "sts:GetCallerIdentity"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

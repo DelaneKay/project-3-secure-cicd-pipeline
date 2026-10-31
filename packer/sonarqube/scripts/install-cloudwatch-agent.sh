@@ -96,3 +96,30 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'JSON'
 JSON
 
 chmod 0644 /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+
+cat > /usr/local/sbin/project-3-start-cloudwatch-agent <<'SCRIPT'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+exec /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+  -a fetch-config -m ec2 \
+  -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json \
+  -s
+SCRIPT
+chmod 0755 /usr/local/sbin/project-3-start-cloudwatch-agent
+
+cat > /etc/systemd/system/project-3-cloudwatch-agent.service <<'UNIT'
+[Unit]
+Description=Start CloudWatch Agent with the EC2 instance role
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/project-3-start-cloudwatch-agent
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable project-3-cloudwatch-agent.service

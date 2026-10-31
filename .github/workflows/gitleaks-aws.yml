@@ -1,0 +1,71 @@
+name: Gitleaks secrets scan on AWS
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitleaks-aws-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gitleaks:
+    if: github.ref == 'refs/heads/master'
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - project-3-scanner
+    timeout-minutes: 15
+    steps:
+      - name: Check out full Git history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan Git history with Gitleaks
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gitleaks version
+
+          mkdir -p reports
+          raw_report="$RUNNER_TEMP/gitleaks-raw.json"
+          trap 'rm -f "$raw_report"' EXIT
+
+          gitleaks git . \
+            --no-banner \
+            --redact=100 \
+            --report-format json \
+            --report-path "$raw_report" \
+            --exit-code 0
+
+          test -s "$raw_report"
+          jq 'map({
+            Description,
+            StartLine,
+            EndLine,
+            StartColumn,
+            EndColumn,
+            File,
+            SymlinkFile,
+            Commit,
+            Entropy,
+            RuleID,
+            Tags
+          })' "$raw_report" > reports/gitleaks.json
+
+      - name: Upload sanitized Gitleaks report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gitleaks-aws-report
+          path: reports/gitleaks.json
+          if-no-files-found: ignore
+          retention-days: 7

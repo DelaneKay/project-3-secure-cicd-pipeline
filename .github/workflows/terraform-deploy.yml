@@ -1,0 +1,74 @@
+name: Terraform deployment
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform-*.yml"
+      - "docs/terraform-layering-rationale.md"
+      - "LAB-3-SOURCE-OF-TRUTH.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: project-3-terraform-deployment
+  cancel-in-progress: false
+
+jobs:
+  network:
+    uses: ./.github/workflows/terraform-layer.yml
+    with:
+      root: network
+      juice_shop_allowed_cidrs: ${{ vars.JUICE_SHOP_ALLOWED_CIDRS || '[]' }}
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      aws_region: us-east-1
+      plan_role_arn: ${{ vars.AWS_TERRAFORM_PLAN_ROLE_ARN }}
+      apply_role_arn: ${{ vars.AWS_TERRAFORM_APPLY_ROLE_ARN }}
+
+  database:
+    needs: network
+    uses: ./.github/workflows/terraform-layer.yml
+    with:
+      root: database
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      aws_region: us-east-1
+      plan_role_arn: ${{ vars.AWS_TERRAFORM_PLAN_ROLE_ARN }}
+      apply_role_arn: ${{ vars.AWS_TERRAFORM_APPLY_ROLE_ARN }}
+
+  observability:
+    needs: network
+    uses: ./.github/workflows/terraform-layer.yml
+    with:
+      root: observability
+      notification_email: ${{ vars.TF_NOTIFICATION_EMAIL || '' }}
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      aws_region: us-east-1
+      plan_role_arn: ${{ vars.AWS_TERRAFORM_PLAN_ROLE_ARN }}
+      apply_role_arn: ${{ vars.AWS_TERRAFORM_APPLY_ROLE_ARN }}
+
+  compute:
+    needs: [network, observability]
+    uses: ./.github/workflows/terraform-layer.yml
+    secrets:
+      RUNNER_GITHUB_APP_ID: ${{ secrets.RUNNER_GITHUB_APP_ID }}
+      RUNNER_GITHUB_APP_PRIVATE_KEY: ${{ secrets.RUNNER_GITHUB_APP_PRIVATE_KEY }}
+    with:
+      root: compute
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      aws_region: us-east-1
+      plan_role_arn: ${{ vars.AWS_TERRAFORM_PLAN_ROLE_ARN }}
+      apply_role_arn: ${{ vars.AWS_TERRAFORM_APPLY_ROLE_ARN }}
+
+  sonarqube:
+    needs: [network, database, observability]
+    uses: ./.github/workflows/terraform-layer.yml
+    with:
+      root: sonarqube
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      aws_region: us-east-1
+      plan_role_arn: ${{ vars.AWS_TERRAFORM_PLAN_ROLE_ARN }}
+      apply_role_arn: ${{ vars.AWS_TERRAFORM_APPLY_ROLE_ARN }}

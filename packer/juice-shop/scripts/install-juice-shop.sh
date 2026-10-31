@@ -5,7 +5,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
 apt-get -y full-upgrade
-apt-get -y install ca-certificates curl xz-utils ufw
+apt-get -y install ca-certificates curl gnupg xz-utils ufw
 
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
@@ -112,8 +112,25 @@ fi
 
 # Install and configure CloudWatch Agent.
 # Terraform will create these log groups before deploying the instance.
-curl -fsSLo "$work_dir/amazon-cloudwatch-agent.deb" \
-  https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+cloudwatch_url="https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb"
+curl --fail --silent --show-error --location --retry 3 \
+  --output "$work_dir/amazon-cloudwatch-agent.gpg" \
+  https://amazoncloudwatch-agent.s3.amazonaws.com/assets/amazon-cloudwatch-agent.gpg
+gpg_home="$work_dir/cloudwatch-gnupg"
+install -d -m 0700 "$gpg_home"
+gpg --batch --homedir "$gpg_home" --import "$work_dir/amazon-cloudwatch-agent.gpg" >/dev/null
+cloudwatch_fingerprint="$(gpg --batch --homedir "$gpg_home" --with-colons --fingerprint \
+  | awk -F: '$1 == "fpr" {print $10; exit}')"
+if [[ "$cloudwatch_fingerprint" != "937616F3450B7D806CBD9725D58167303B789C72" ]]; then
+  echo "CloudWatch Agent signing-key fingerprint did not match." >&2
+  exit 1
+fi
+curl --fail --silent --show-error --location --retry 3 \
+  --output "$work_dir/amazon-cloudwatch-agent.deb" "$cloudwatch_url"
+curl --fail --silent --show-error --location --retry 3 \
+  --output "$work_dir/amazon-cloudwatch-agent.deb.sig" "${cloudwatch_url}.sig"
+gpg --batch --homedir "$gpg_home" --verify \
+  "$work_dir/amazon-cloudwatch-agent.deb.sig" "$work_dir/amazon-cloudwatch-agent.deb"
 dpkg -i "$work_dir/amazon-cloudwatch-agent.deb"
 
 cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CWCONFIG'
@@ -163,7 +180,31 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CWCON
 CWCONFIG
 
 chmod 0640 /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
-systemctl enable amazon-cloudwatch-agent.service
+cat > /usr/local/sbin/project-3-start-cloudwatch-agent <<'SCRIPT'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+exec /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+  -a fetch-config -m ec2 \
+  -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json \
+  -s
+SCRIPT
+chmod 0755 /usr/local/sbin/project-3-start-cloudwatch-agent
+cat > /etc/systemd/system/project-3-cloudwatch-agent.service <<'UNIT'
+[Unit]
+Description=Start CloudWatch Agent with the EC2 instance role
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/project-3-start-cloudwatch-agent
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable project-3-cloudwatch-agent.service
 
 # SSH is used only by Packer's SSH communicator through its SSM tunnel.
 # Do not start SSH on the deployed Juice Shop host.

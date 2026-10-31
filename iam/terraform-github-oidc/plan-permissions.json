@@ -1,0 +1,105 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadTerraformStateBucketMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketLocation"
+      ],
+      "Resource": "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1"
+    },
+    {
+      "Sid": "ListTerraformStatePrefix",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "project-3/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ReadTerraformStates",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/network/terraform.tfstate",
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/database/terraform.tfstate",
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/observability/terraform.tfstate",
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/compute/terraform.tfstate",
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/sonarqube/terraform.tfstate"
+      ]
+    },
+    {
+      "Sid": "ReadAndMaintainNativeTerraformLocks",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/network/terraform.tfstate.tflock",
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/database/terraform.tfstate.tflock",
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/observability/terraform.tfstate.tflock",
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/compute/terraform.tfstate.tflock",
+        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/sonarqube/terraform.tfstate.tflock"
+      ]
+    },
+    {
+      "Sid": "InspectTerraformManagedResources",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:Describe*",
+        "rds:Describe*",
+        "rds:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "InspectLabIAMResources",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:GetInstanceProfile",
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies",
+        "iam:ListInstanceProfilesForRole",
+        "iam:ListRoles"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "InspectObservabilityResources",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogGroups",
+        "logs:ListTagsForResource",
+        "sns:GetTopicAttributes",
+        "sns:GetSubscriptionAttributes",
+        "sns:ListSubscriptionsByTopic",
+        "sns:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "IdentifyCurrentAccount",
+      "Effect": "Allow",
+      "Action": [
+        "sts:GetCallerIdentity"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

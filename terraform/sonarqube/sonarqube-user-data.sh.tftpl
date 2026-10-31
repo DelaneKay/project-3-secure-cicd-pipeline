@@ -1,0 +1,24 @@
+#!/bin/bash
+set -Eeuo pipefail
+umask 027
+REGION='${aws_region}'
+DB_HOST='${db_host}'
+DB_PORT='${db_port}'
+DB_NAME='${db_name}'
+SECRET_ARN='${secret_arn}'
+secret_json="$(aws secretsmanager get-secret-value --region "$REGION" --secret-id "$SECRET_ARN" --query SecretString --output text)"
+db_user="$(jq -er '.username' <<<"$secret_json")"
+db_password="$(jq -er '.password' <<<"$secret_json")"
+unset secret_json
+config='/opt/sonarqube/conf/sonar.properties'
+install -o sonarqube -g sonarqube -m 0640 /dev/null "$config"
+cat > "$config" <<EOF
+sonar.jdbc.username=$db_user
+sonar.jdbc.password=$db_password
+sonar.jdbc.url=jdbc:postgresql://$DB_HOST:$DB_PORT/$DB_NAME
+EOF
+chown sonarqube:sonarqube "$config"
+chmod 0640 "$config"
+unset db_user db_password
+systemctl enable sonarqube.service
+systemctl restart sonarqube.service

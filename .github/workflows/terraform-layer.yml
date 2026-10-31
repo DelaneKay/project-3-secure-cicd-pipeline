@@ -1,0 +1,207 @@
+name: Terraform layer
+
+on:
+  workflow_call:
+    inputs:
+      root:
+        required: true
+        type: string
+      state_bucket:
+        required: true
+        type: string
+      aws_region:
+        required: false
+        type: string
+        default: us-east-1
+      plan_role_arn:
+        required: true
+        type: string
+      apply_role_arn:
+        required: true
+        type: string
+      juice_shop_allowed_cidrs:
+        required: false
+        type: string
+        default: "[]"
+      notification_email:
+        required: false
+        type: string
+        default: ""
+      action:
+        required: false
+        type: string
+        default: apply
+    secrets:
+      RUNNER_GITHUB_APP_ID:
+        required: false
+      RUNNER_GITHUB_APP_PRIVATE_KEY:
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  plan:
+    name: Plan ${{ inputs.root }} (${{ inputs.action }})
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: 1.16.2
+          terraform_wrapper: false
+
+      - name: Configure AWS plan role with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502
+        with:
+          role-to-assume: ${{ inputs.plan_role_arn }}
+          aws-region: ${{ inputs.aws_region }}
+          role-session-name: terraform-plan-${{ inputs.root }}
+
+      - name: Initialize and create saved plan
+        shell: bash
+        env:
+          TF_STATE_BUCKET: ${{ inputs.state_bucket }}
+          AWS_REGION: ${{ inputs.aws_region }}
+          TF_VAR_juice_shop_allowed_cidrs: ${{ inputs.juice_shop_allowed_cidrs }}
+          TF_VAR_notification_email: ${{ inputs.notification_email }}
+        run: |
+          set -Eeuo pipefail
+          root="terraform/${{ inputs.root }}"
+          terraform -chdir="$root" init -input=false -lock-timeout=5m \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=project-3/${{ inputs.root }}/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="use_lockfile=true"
+          case "${{ inputs.action }}" in
+            apply)
+              terraform -chdir="$root" plan -input=false -no-color -lock-timeout=5m -out="$RUNNER_TEMP/${{ inputs.root }}.tfplan"
+              ;;
+            destroy)
+              terraform -chdir="$root" plan -destroy -input=false -no-color -lock-timeout=5m -out="$RUNNER_TEMP/${{ inputs.root }}.tfplan"
+              ;;
+            *)
+              echo "Unsupported Terraform operation." >&2
+              exit 2
+              ;;
+          esac
+          terraform -chdir="$root" show -no-color "$RUNNER_TEMP/${{ inputs.root }}.tfplan" > "$RUNNER_TEMP/${{ inputs.root }}-plan.txt"
+          (cd "$RUNNER_TEMP" && sha256sum "${{ inputs.root }}.tfplan" > "${{ inputs.root }}.tfplan.sha256")
+
+      - name: Upload saved plan and human-readable review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: terraform-plan-${{ inputs.action }}-${{ inputs.root }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/${{ inputs.root }}.tfplan
+            ${{ runner.temp }}/${{ inputs.root }}.tfplan.sha256
+            ${{ runner.temp }}/${{ inputs.root }}-plan.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  apply:
+    name: ${{ inputs.action }} ${{ inputs.root }} after review
+    needs: plan
+    runs-on: ubuntu-24.04
+    environment: terraform-lab-apply
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: 1.16.2
+          terraform_wrapper: false
+
+      - name: Configure AWS apply role with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502
+        with:
+          role-to-assume: ${{ inputs.apply_role_arn }}
+          aws-region: ${{ inputs.aws_region }}
+          role-session-name: terraform-apply-${{ inputs.root }}
+
+      - name: Download reviewed plan
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: terraform-plan-${{ inputs.action }}-${{ inputs.root }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/terraform-plan
+
+      - name: Initialize Terraform for runner plan inspection
+        if: inputs.root == 'compute' && inputs.action == 'apply'
+        shell: bash
+        env:
+          TF_STATE_BUCKET: ${{ inputs.state_bucket }}
+          AWS_REGION: ${{ inputs.aws_region }}
+        run: |
+          set -Eeuo pipefail
+          terraform -chdir=terraform/compute init -input=false -lock-timeout=5m \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=project-3/compute/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="use_lockfile=true"
+
+      - name: Create short-lived GitHub App token
+        if: inputs.root == 'compute' && inputs.action == 'apply'
+        id: runner-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RUNNER_GITHUB_APP_ID }}
+          private-key: ${{ secrets.RUNNER_GITHUB_APP_PRIVATE_KEY }}
+          owner: DelaneKay
+          repositories: project-3-secure-cicd-pipeline
+          permission-administration: write
+
+      - name: Prepare a runner registration token only for a new runner
+        if: inputs.root == 'compute' && inputs.action == 'apply'
+        shell: bash
+        env:
+          GH_APP_TOKEN: ${{ steps.runner-app-token.outputs.token }}
+          AWS_REGION: ${{ inputs.aws_region }}
+        run: |
+          set -Eeuo pipefail
+          plan_json="$(terraform -chdir=terraform/compute show -json "$RUNNER_TEMP/terraform-plan/compute.tfplan")"
+          if ! jq -e '[.resource_changes[]? | select(.address == "aws_instance.github_runner") | select(.change.actions | index("create"))] | length > 0' <<<"$plan_json" >/dev/null; then
+            echo "No new scanner runner instance is planned; no registration token was created."
+            exit 0
+          fi
+          response="$(curl --fail --silent --show-error --location \
+            --request POST \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GH_APP_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/DelaneKay/project-3-secure-cicd-pipeline/actions/runners/registration-token)"
+          runner_token="$(jq -er '.token' <<<"$response")"
+          unset response
+          aws ssm put-parameter --region "$AWS_REGION" \
+            --name /project-3/github-runner/registration-token \
+            --type SecureString --overwrite --value "$runner_token" >/dev/null
+          unset runner_token
+          echo "One-time registration token stored in SSM for the new EC2 runner."
+
+      - name: Verify and apply the exact saved plan
+        shell: bash
+        env:
+          TF_STATE_BUCKET: ${{ inputs.state_bucket }}
+          AWS_REGION: ${{ inputs.aws_region }}
+        run: |
+          set -Eeuo pipefail
+          root="terraform/${{ inputs.root }}"
+          terraform -chdir="$root" init -input=false -lock-timeout=5m \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=project-3/${{ inputs.root }}/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="use_lockfile=true"
+          cd "$RUNNER_TEMP/terraform-plan"
+          sha256sum --check "${{ inputs.root }}.tfplan.sha256"
+          terraform -chdir="$GITHUB_WORKSPACE/$root" apply -input=false -no-color -lock-timeout=5m "$RUNNER_TEMP/terraform-plan/${{ inputs.root }}.tfplan"
