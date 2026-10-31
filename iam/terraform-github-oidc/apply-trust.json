@@ -11,7 +11,7 @@
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:DelaneKay/project-3-secure-cicd-pipeline:environment:terraform-lab-apply"
+          "token.actions.githubusercontent.com:sub": "repo:DelaneKay@59389630/project-3-secure-cicd-pipeline@1438456744:environment:terraform-lab-apply"
         }
       }
     }

@@ -36,8 +36,8 @@ The script creates/configures a private, versioned, encrypted bucket with public
 
 Create the GitHub OIDC provider in account `273517699789`: issuer `https://token.actions.githubusercontent.com`, audience `sts.amazonaws.com`. Use separate plan and apply roles; do not store AWS keys in GitHub.
 
-- Plan role trust: audience is `sts.amazonaws.com`; subject is `repo:DelaneKay/project-3-secure-cicd-pipeline:ref:refs/heads/master`.
-- Apply role trust: audience is `sts.amazonaws.com`; subject is `repo:DelaneKay/project-3-secure-cicd-pipeline:environment:terraform-lab-apply`.
+- Plan role trust: audience is `sts.amazonaws.com`; subject is `repo:DelaneKay@59389630/project-3-secure-cicd-pipeline@1438456744:ref:refs/heads/master`.
+- Apply role trust: audience is `sts.amazonaws.com`; subject is `repo:DelaneKay@59389630/project-3-secure-cicd-pipeline@1438456744:environment:terraform-lab-apply`.
 
 Give the plan role read-only access to the managed AWS services and state objects, plus S3 write/delete access only to the five state lock paths. Give the apply role only the actions represented by these Terraform roots, state read/write, lock read/write/delete, and `iam:PassRole` restricted to Project 3 instance roles with EC2 as the receiving service. Restrict S3 ListBucket to `project-3/*`. Do not attach `AdministratorAccess`.
 
