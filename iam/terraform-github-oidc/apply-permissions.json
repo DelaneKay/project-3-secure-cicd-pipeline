@@ -66,39 +66,6 @@
       "Resource": "*"
     },
     {
-      "Sid": "CreateTaggedLabNetworkResources",
-      "Effect": "Allow",
-      "Action": [
-        "ec2:CreateVpc",
-        "ec2:CreateSubnet",
-        "ec2:CreateInternetGateway",
-        "ec2:CreateRouteTable",
-        "ec2:CreateSecurityGroup",
-        "ec2:CreateTags"
-      ],
-      "Resource": "*",
-      "Condition": {
-        "StringEquals": {
-          "aws:RequestTag/Project": "project-3-secure-cicd-pipeline",
-          "aws:RequestedRegion": "us-east-1"
-        }
-      }
-    },
-    {
-      "Sid": "CreateLabVpcEndpoints",
-      "Effect": "Allow",
-      "Action": [
-        "ec2:CreateVpcEndpoint"
-      ],
-      "Resource": "*",
-      "Condition": {
-        "StringEquals": {
-          "aws:RequestedRegion": "us-east-1",
-          "aws:RequestTag/Project": "project-3-secure-cicd-pipeline"
-        }
-      }
-    },
-    {
       "Sid": "LaunchApprovedLabInstanceTypes",
       "Effect": "Allow",
       "Action": [
@@ -337,6 +304,159 @@
         "sts:GetCallerIdentity"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "CreateTaggedLabVpcAndInternetGateway",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateVpc",
+        "ec2:CreateInternetGateway"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "project-3-secure-cicd-pipeline",
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "TagProjectNetworkResourcesOnCreate",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateTags"
+      ],
+      "Resource": [
+        "arn:aws:ec2:us-east-1:273517699789:vpc/*",
+        "arn:aws:ec2:us-east-1:273517699789:subnet/*",
+        "arn:aws:ec2:us-east-1:273517699789:internet-gateway/*",
+        "arn:aws:ec2:us-east-1:273517699789:route-table/*",
+        "arn:aws:ec2:us-east-1:273517699789:security-group/*",
+        "arn:aws:ec2:us-east-1:273517699789:vpc-endpoint/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "project-3-secure-cicd-pipeline",
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "CreateTaggedLabSubnets",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateSubnet"
+      ],
+      "Resource": "arn:aws:ec2:us-east-1:273517699789:subnet/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "project-3-secure-cicd-pipeline",
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "CreateSubnetsOnlyInTaggedLabVpc",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateSubnet"
+      ],
+      "Resource": "arn:aws:ec2:us-east-1:273517699789:vpc/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/Project": "project-3-secure-cicd-pipeline",
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "CreateTaggedLabRouteTables",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateRouteTable"
+      ],
+      "Resource": "arn:aws:ec2:us-east-1:273517699789:route-table/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "project-3-secure-cicd-pipeline",
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "CreateRouteTablesOnlyInTaggedLabVpc",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateRouteTable"
+      ],
+      "Resource": "arn:aws:ec2:us-east-1:273517699789:vpc/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/Project": "project-3-secure-cicd-pipeline",
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "CreateTaggedLabSecurityGroups",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateSecurityGroup"
+      ],
+      "Resource": "arn:aws:ec2:us-east-1:273517699789:security-group/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "project-3-secure-cicd-pipeline",
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "CreateSecurityGroupsOnlyInTaggedLabVpc",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateSecurityGroup"
+      ],
+      "Resource": "arn:aws:ec2:us-east-1:273517699789:vpc/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/Project": "project-3-secure-cicd-pipeline",
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "CreateTaggedLabVpcEndpoints",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateVpcEndpoint"
+      ],
+      "Resource": "arn:aws:ec2:us-east-1:273517699789:vpc-endpoint/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "project-3-secure-cicd-pipeline",
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "CreateVpcEndpointsOnlyWithTaggedLabResources",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateVpcEndpoint"
+      ],
+      "Resource": [
+        "arn:aws:ec2:us-east-1:273517699789:route-table/*",
+        "arn:aws:ec2:us-east-1:273517699789:security-group/*",
+        "arn:aws:ec2:us-east-1:273517699789:subnet/*",
+        "arn:aws:ec2:us-east-1:273517699789:vpc/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/Project": "project-3-secure-cicd-pipeline",
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
     }
   ]
 }
