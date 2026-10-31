@@ -54,6 +54,7 @@ aws iam put-role-policy \
 ```
 
 Check the returned policy with `aws iam get-role-policy`. `logs:DescribeLogGroups` uses `Resource: "*"` because CloudWatch Logs does not support resource-level authorization for that list operation; log-group create, delete, retention, and tag actions remain scoped to `/project-3/*`. The RDS subnet-group resource ARN must match `terraform/database/subnet-group.tf`; with the current database identifier, it is `arn:aws:rds:us-east-1:273517699789:subgrp:project-3-sonarqube-subnets`.
+EC2 instance tags are authorized separately: the apply role may call `ec2:CreateTags` only on instance ARNs during `RunInstances`, and only when the request includes the lab `Project` tag.
 
 The next Terraform deployment must create a fresh plan from the current S3 state; do not reuse a saved plan from an apply that partially failed.
 
