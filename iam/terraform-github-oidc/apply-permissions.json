@@ -66,19 +66,97 @@
       "Resource": "*"
     },
     {
-      "Sid": "LaunchApprovedLabInstanceTypes",
+      "Sid": "LaunchOnlyProjectAmis",
       "Effect": "Allow",
       "Action": [
         "ec2:RunInstances"
       ],
-      "Resource": "*",
+      "Resource": "arn:aws:ec2:us-east-1:273517699789:image/ami-*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "LaunchApprovedTaggedLabInstances",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances"
+      ],
+      "Resource": "arn:aws:ec2:us-east-1:273517699789:instance/*",
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "us-east-1",
+          "aws:RequestTag/Project": "project-3-secure-cicd-pipeline",
           "ec2:InstanceType": [
             "t3.small",
             "c7i-flex.large"
           ]
+        }
+      }
+    },
+    {
+      "Sid": "LaunchIntoTaggedLabSubnets",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances"
+      ],
+      "Resource": "arn:aws:ec2:us-east-1:273517699789:subnet/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1",
+          "ec2:ResourceTag/Project": "project-3-secure-cicd-pipeline"
+        }
+      }
+    },
+    {
+      "Sid": "UseTaggedLabSecurityGroupsForLaunch",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances"
+      ],
+      "Resource": "arn:aws:ec2:us-east-1:273517699789:security-group/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1",
+          "ec2:ResourceTag/Project": "project-3-secure-cicd-pipeline"
+        }
+      }
+    },
+    {
+      "Sid": "LaunchInterfacesOnlyInProjectVpc",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances"
+      ],
+      "Resource": "arn:aws:ec2:us-east-1:273517699789:network-interface/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1",
+          "ec2:Vpc": "arn:aws:ec2:us-east-1:273517699789:vpc/vpc-09e061e4136ce84bb",
+          "ec2:Subnet": [
+            "arn:aws:ec2:us-east-1:273517699789:subnet/subnet-0df5798b1151f134d",
+            "arn:aws:ec2:us-east-1:273517699789:subnet/subnet-009baeb42c8346ea4",
+            "arn:aws:ec2:us-east-1:273517699789:subnet/subnet-0db9eae46bc0f7c97",
+            "arn:aws:ec2:us-east-1:273517699789:subnet/subnet-01695dab2efa82421"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "LaunchOnlyEncryptedVolumes",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances"
+      ],
+      "Resource": "arn:aws:ec2:us-east-1:273517699789:volume/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1"
+        },
+        "Bool": {
+          "ec2:Encrypted": "true"
         }
       }
     },
