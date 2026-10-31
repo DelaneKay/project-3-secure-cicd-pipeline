@@ -54,7 +54,7 @@ aws iam put-role-policy \
 ```
 
 Check the returned policy with `aws iam get-role-policy`. `logs:DescribeLogGroups` uses `Resource: "*"` because CloudWatch Logs does not support resource-level authorization for that list operation; log-group create, delete, retention, and tag actions remain scoped to `/project-3/*`. The RDS subnet-group resource ARN must match `terraform/database/subnet-group.tf`; with the current database identifier, it is `arn:aws:rds:us-east-1:273517699789:subgrp:project-3-sonarqube-subnets`.
-EC2 instance tags are authorized separately: the apply role may call `ec2:CreateTags` only on instance ARNs during `RunInstances`, and only when the request includes the lab `Project` tag.
+EC2 launch permissions are split by resource type. Instance type and the lab `Project` request tag are checked only against the instance ARN; AMIs are limited to images owned by this account; subnets and security groups must carry the lab `Project` tag; EBS volumes must be encrypted; and launch network interfaces are restricted to the current lab VPC and its four subnets. The VPC and subnet IDs in the policy must be updated if the network layer is replaced. This split is required because `ec2:InstanceType` is not available for network-interface resources, so applying that condition to one wildcard `RunInstances` statement denies launch. EC2 instance tags are authorized separately: the apply role may call `ec2:CreateTags` only on instance ARNs during `RunInstances`, and only when the request includes the lab `Project` tag.
 
 The next Terraform deployment must create a fresh plan from the current S3 state; do not reuse a saved plan from an apply that partially failed.
 
