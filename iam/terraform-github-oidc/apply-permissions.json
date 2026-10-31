@@ -235,7 +235,7 @@
       ],
       "Resource": [
         "arn:aws:rds:us-east-1:273517699789:db:project-3-sonarqube",
-        "arn:aws:rds:us-east-1:273517699789:subgrp:project-3-secure-cicd-pipeline-sonarqube"
+        "arn:aws:rds:us-east-1:273517699789:subgrp:project-3-sonarqube-subnets"
       ],
       "Condition": {
         "StringEquals": {
@@ -266,8 +266,7 @@
         "logs:DeleteRetentionPolicy",
         "logs:ListTagsForResource",
         "logs:TagResource",
-        "logs:UntagResource",
-        "logs:DescribeLogGroups"
+        "logs:UntagResource"
       ],
       "Resource": "arn:aws:logs:us-east-1:273517699789:log-group:/project-3/*"
     },
@@ -457,6 +456,14 @@
           "aws:RequestedRegion": "us-east-1"
         }
       }
+    },
+    {
+      "Sid": "DescribeProjectLogGroups",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogGroups"
+      ],
+      "Resource": "*"
     }
   ]
 }
