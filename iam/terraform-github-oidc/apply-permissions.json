@@ -2,71 +2,7 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "ReadTerraformStateBucketMetadata",
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetBucketLocation"
-      ],
-      "Resource": "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1"
-    },
-    {
-      "Sid": "ListTerraformStatePrefix",
-      "Effect": "Allow",
-      "Action": [
-        "s3:ListBucket"
-      ],
-      "Resource": "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1",
-      "Condition": {
-        "StringLike": {
-          "s3:prefix": [
-            "project-3/*"
-          ]
-        }
-      }
-    },
-    {
-      "Sid": "ReadAndWriteTerraformStates",
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetObject",
-        "s3:PutObject"
-      ],
-      "Resource": [
-        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/network/terraform.tfstate",
-        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/database/terraform.tfstate",
-        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/observability/terraform.tfstate",
-        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/compute/terraform.tfstate",
-        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/sonarqube/terraform.tfstate"
-      ]
-    },
-    {
-      "Sid": "ReadAndMaintainNativeTerraformLocks",
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetObject",
-        "s3:PutObject",
-        "s3:DeleteObject"
-      ],
-      "Resource": [
-        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/network/terraform.tfstate.tflock",
-        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/database/terraform.tfstate.tflock",
-        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/observability/terraform.tfstate.tflock",
-        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/compute/terraform.tfstate.tflock",
-        "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/sonarqube/terraform.tfstate.tflock"
-      ]
-    },
-    {
-      "Sid": "InspectTerraformManagedResources",
-      "Effect": "Allow",
-      "Action": [
-        "ec2:Describe*",
-        "rds:Describe*",
-        "rds:ListTagsForResource"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "LaunchOnlyProjectAmis",
+      "Sid": "LaunchProjectAmis",
       "Effect": "Allow",
       "Action": [
         "ec2:RunInstances"
@@ -79,7 +15,7 @@
       }
     },
     {
-      "Sid": "LaunchApprovedTaggedLabInstances",
+      "Sid": "LaunchApprovedInstances",
       "Effect": "Allow",
       "Action": [
         "ec2:RunInstances"
@@ -97,7 +33,7 @@
       }
     },
     {
-      "Sid": "LaunchIntoTaggedLabSubnets",
+      "Sid": "LaunchInTaggedSubnets",
       "Effect": "Allow",
       "Action": [
         "ec2:RunInstances"
@@ -106,12 +42,13 @@
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "us-east-1",
-          "ec2:ResourceTag/Project": "project-3-secure-cicd-pipeline"
+          "ec2:ResourceTag/Project": "project-3-secure-cicd-pipeline",
+          "ec2:Vpc": "arn:aws:ec2:us-east-1:273517699789:vpc/vpc-09e061e4136ce84bb"
         }
       }
     },
     {
-      "Sid": "UseTaggedLabSecurityGroupsForLaunch",
+      "Sid": "UseTaggedLabSecurityGroups",
       "Effect": "Allow",
       "Action": [
         "ec2:RunInstances"
@@ -120,12 +57,13 @@
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "us-east-1",
-          "ec2:ResourceTag/Project": "project-3-secure-cicd-pipeline"
+          "ec2:ResourceTag/Project": "project-3-secure-cicd-pipeline",
+          "ec2:Vpc": "arn:aws:ec2:us-east-1:273517699789:vpc/vpc-09e061e4136ce84bb"
         }
       }
     },
     {
-      "Sid": "LaunchInterfacesOnlyInProjectVpc",
+      "Sid": "LaunchInterfacesInLabVpc",
       "Effect": "Allow",
       "Action": [
         "ec2:RunInstances"
@@ -145,7 +83,7 @@
       }
     },
     {
-      "Sid": "LaunchOnlyEncryptedVolumes",
+      "Sid": "LaunchEncryptedVolumes",
       "Effect": "Allow",
       "Action": [
         "ec2:RunInstances"
@@ -161,7 +99,56 @@
       }
     },
     {
-      "Sid": "ModifyOrDeleteTaggedLabNetworkResources",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketLocation"
+      ],
+      "Resource": "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "project-3/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "StateObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/*/terraform.tfstate"
+    },
+    {
+      "Sid": "StateLocks",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::project-3-tfstate-273517699789-us-east-1/project-3/*/terraform.tfstate.tflock"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:Describe*",
+        "rds:Describe*",
+        "rds:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ManageNetwork",
       "Effect": "Allow",
       "Action": [
         "ec2:ModifyVpcAttribute",
@@ -195,7 +182,7 @@
       }
     },
     {
-      "Sid": "ManageProjectRolesAndPolicies",
+      "Sid": "ManageIAM",
       "Effect": "Allow",
       "Action": [
         "iam:CreateRole",
@@ -215,7 +202,6 @@
       "Resource": "arn:aws:iam::273517699789:role/project-3-secure-cicd-pipeline-*"
     },
     {
-      "Sid": "AttachOnlySSMManagedPolicyToLabRoles",
       "Effect": "Allow",
       "Action": [
         "iam:AttachRolePolicy",
@@ -227,7 +213,6 @@
       ]
     },
     {
-      "Sid": "ManageProjectInstanceProfiles",
       "Effect": "Allow",
       "Action": [
         "iam:CreateInstanceProfile",
@@ -244,7 +229,6 @@
       ]
     },
     {
-      "Sid": "ListInstanceProfilesForProjectRoles",
       "Effect": "Allow",
       "Action": [
         "iam:ListInstanceProfilesForRole"
@@ -252,7 +236,7 @@
       "Resource": "arn:aws:iam::273517699789:role/project-3-secure-cicd-pipeline-*"
     },
     {
-      "Sid": "PassOnlyProjectRolesToEC2",
+      "Sid": "PassRoles",
       "Effect": "Allow",
       "Action": [
         "iam:PassRole"
@@ -265,7 +249,6 @@
       }
     },
     {
-      "Sid": "CreateRdsManagedMasterSecret",
       "Effect": "Allow",
       "Action": [
         "secretsmanager:CreateSecret"
@@ -278,7 +261,6 @@
       }
     },
     {
-      "Sid": "TagRdsManagedMasterSecret",
       "Effect": "Allow",
       "Action": [
         "secretsmanager:TagResource"
@@ -286,7 +268,6 @@
       "Resource": "arn:aws:secretsmanager:us-east-1:273517699789:secret:rds!*"
     },
     {
-      "Sid": "DescribeSecretsManagerKey",
       "Effect": "Allow",
       "Action": [
         "kms:DescribeKey"
@@ -299,7 +280,7 @@
       }
     },
     {
-      "Sid": "ManageOnlyProjectSonarDatabase",
+      "Sid": "SonarDB",
       "Effect": "Allow",
       "Action": [
         "rds:CreateDBInstance",
@@ -322,7 +303,6 @@
       }
     },
     {
-      "Sid": "CreateRdsServiceLinkedRoleIfNeeded",
       "Effect": "Allow",
       "Action": [
         "iam:CreateServiceLinkedRole"
@@ -335,7 +315,7 @@
       }
     },
     {
-      "Sid": "ManageProjectLogGroups",
+      "Sid": "Logs",
       "Effect": "Allow",
       "Action": [
         "logs:CreateLogGroup",
@@ -349,7 +329,7 @@
       "Resource": "arn:aws:logs:us-east-1:273517699789:log-group:/project-3/*"
     },
     {
-      "Sid": "ManageProjectScanNotificationTopic",
+      "Sid": "ScanTopic",
       "Effect": "Allow",
       "Action": [
         "sns:CreateTopic",
@@ -367,7 +347,7 @@
       "Resource": "arn:aws:sns:us-east-1:273517699789:project-3-secure-cicd-pipeline-scan-findings"
     },
     {
-      "Sid": "StoreEphemeralRunnerRegistrationToken",
+      "Sid": "RunnerToken",
       "Effect": "Allow",
       "Action": [
         "ssm:PutParameter"
@@ -375,7 +355,6 @@
       "Resource": "arn:aws:ssm:us-east-1:273517699789:parameter/project-3/github-runner/registration-token"
     },
     {
-      "Sid": "IdentifyCurrentAccount",
       "Effect": "Allow",
       "Action": [
         "sts:GetCallerIdentity"
@@ -383,7 +362,6 @@
       "Resource": "*"
     },
     {
-      "Sid": "CreateTaggedLabVpcAndInternetGateway",
       "Effect": "Allow",
       "Action": [
         "ec2:CreateVpc",
@@ -398,7 +376,6 @@
       }
     },
     {
-      "Sid": "TagProjectNetworkResourcesOnCreate",
       "Effect": "Allow",
       "Action": [
         "ec2:CreateTags"
@@ -419,7 +396,6 @@
       }
     },
     {
-      "Sid": "CreateTaggedLabSubnets",
       "Effect": "Allow",
       "Action": [
         "ec2:CreateSubnet"
@@ -433,7 +409,6 @@
       }
     },
     {
-      "Sid": "CreateSubnetsOnlyInTaggedLabVpc",
       "Effect": "Allow",
       "Action": [
         "ec2:CreateSubnet"
@@ -447,7 +422,6 @@
       }
     },
     {
-      "Sid": "CreateTaggedLabRouteTables",
       "Effect": "Allow",
       "Action": [
         "ec2:CreateRouteTable"
@@ -461,7 +435,6 @@
       }
     },
     {
-      "Sid": "CreateRouteTablesOnlyInTaggedLabVpc",
       "Effect": "Allow",
       "Action": [
         "ec2:CreateRouteTable"
@@ -475,7 +448,6 @@
       }
     },
     {
-      "Sid": "CreateTaggedLabSecurityGroups",
       "Effect": "Allow",
       "Action": [
         "ec2:CreateSecurityGroup"
@@ -489,7 +461,6 @@
       }
     },
     {
-      "Sid": "CreateSecurityGroupsOnlyInTaggedLabVpc",
       "Effect": "Allow",
       "Action": [
         "ec2:CreateSecurityGroup"
@@ -503,7 +474,6 @@
       }
     },
     {
-      "Sid": "CreateTaggedLabVpcEndpoints",
       "Effect": "Allow",
       "Action": [
         "ec2:CreateVpcEndpoint"
@@ -517,7 +487,6 @@
       }
     },
     {
-      "Sid": "CreateVpcEndpointsOnlyWithTaggedLabResources",
       "Effect": "Allow",
       "Action": [
         "ec2:CreateVpcEndpoint"
@@ -536,7 +505,6 @@
       }
     },
     {
-      "Sid": "DescribeProjectLogGroups",
       "Effect": "Allow",
       "Action": [
         "logs:DescribeLogGroups"
