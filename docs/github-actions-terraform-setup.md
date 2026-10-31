@@ -53,7 +53,9 @@ aws iam put-role-policy \
   --profile mds-devsecops-lab
 ```
 
-Check the returned policy with `aws iam get-role-policy`. The next Terraform deployment must create a fresh plan from the current S3 state; do not reuse a saved plan from an apply that partially failed.
+Check the returned policy with `aws iam get-role-policy`. `logs:DescribeLogGroups` uses `Resource: "*"` because CloudWatch Logs does not support resource-level authorization for that list operation; log-group create, delete, retention, and tag actions remain scoped to `/project-3/*`. The RDS subnet-group resource ARN must match `terraform/database/subnet-group.tf`; with the current database identifier, it is `arn:aws:rds:us-east-1:273517699789:subgrp:project-3-sonarqube-subnets`.
+
+The next Terraform deployment must create a fresh plan from the current S3 state; do not reuse a saved plan from an apply that partially failed.
 
 Add these repository Actions variables:
 
