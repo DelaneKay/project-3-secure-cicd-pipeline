@@ -7,10 +7,11 @@
       "Action": [
         "ec2:RunInstances"
       ],
-      "Resource": "arn:aws:ec2:us-east-1:273517699789:image/ami-*",
+      "Resource": "arn:aws:ec2:us-east-1::image/ami-*",
       "Condition": {
         "StringEquals": {
-          "aws:RequestedRegion": "us-east-1"
+          "aws:RequestedRegion": "us-east-1",
+          "ec2:Owner": "273517699789"
         }
       }
     },
