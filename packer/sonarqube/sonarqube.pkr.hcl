@@ -34,6 +34,11 @@ variable "builder_instance_type" {
   default = "t3.small"
 }
 
+variable "ssh_timeout" {
+  type    = string
+  default = "10m"
+}
+
 variable "sonarqube_version" {
   type = string
 }
@@ -54,7 +59,8 @@ source "amazon-ebs" "sonarqube" {
   communicator              = "ssh"
   ssh_interface             = "session_manager"
   ssh_username              = "ubuntu"
-  ssh_timeout               = "30m"
+  ssh_timeout               = var.ssh_timeout
+  pause_before_ssm          = "30s"
   ssh_clear_authorized_keys = true
 
   ami_name        = "project-3-sonarqube-ubuntu-24-04-{{timestamp}}"
