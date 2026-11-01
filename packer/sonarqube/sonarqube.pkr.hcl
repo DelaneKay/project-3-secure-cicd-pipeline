@@ -88,6 +88,11 @@ build {
   name    = "sonarqube-ami"
   sources = ["source.amazon-ebs.sonarqube"]
 
+  provisioner "file" {
+    source      = "${path.root}/scripts/start-sonarqube.sh"
+    destination = "/tmp/project-3-start-sonarqube"
+  }
+
   provisioner "shell" {
     script = "${path.root}/scripts/install-sonarqube.sh"
 
@@ -98,9 +103,9 @@ build {
 
     execute_command = "sudo -E env {{ .Vars }} bash '{{ .Path }}'"
   }
+
   provisioner "shell" {
     script          = "${path.root}/scripts/install-cloudwatch-agent.sh"
     execute_command = "sudo -E bash '{{ .Path }}'"
   }
-
 }
