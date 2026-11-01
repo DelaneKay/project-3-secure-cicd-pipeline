@@ -44,7 +44,7 @@
         "StringEquals": {
           "aws:RequestedRegion": "us-east-1",
           "ec2:ResourceTag/Project": "project-3-secure-cicd-pipeline",
-          "ec2:Vpc": "arn:aws:ec2:us-east-1:273517699789:vpc/vpc-09e061e4136ce84bb"
+          "ec2:Vpc": "arn:aws:ec2:us-east-1:273517699789:vpc/vpc-0ea64498832a70076"
         }
       }
     },
@@ -59,7 +59,7 @@
         "StringEquals": {
           "aws:RequestedRegion": "us-east-1",
           "ec2:ResourceTag/Project": "project-3-secure-cicd-pipeline",
-          "ec2:Vpc": "arn:aws:ec2:us-east-1:273517699789:vpc/vpc-09e061e4136ce84bb"
+          "ec2:Vpc": "arn:aws:ec2:us-east-1:273517699789:vpc/vpc-0ea64498832a70076"
         }
       }
     },
@@ -73,12 +73,12 @@
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "us-east-1",
-          "ec2:Vpc": "arn:aws:ec2:us-east-1:273517699789:vpc/vpc-09e061e4136ce84bb",
+          "ec2:Vpc": "arn:aws:ec2:us-east-1:273517699789:vpc/vpc-0ea64498832a70076",
           "ec2:Subnet": [
-            "arn:aws:ec2:us-east-1:273517699789:subnet/subnet-0df5798b1151f134d",
-            "arn:aws:ec2:us-east-1:273517699789:subnet/subnet-009baeb42c8346ea4",
-            "arn:aws:ec2:us-east-1:273517699789:subnet/subnet-0db9eae46bc0f7c97",
-            "arn:aws:ec2:us-east-1:273517699789:subnet/subnet-01695dab2efa82421"
+            "arn:aws:ec2:us-east-1:273517699789:subnet/subnet-05343cbef4a0e3cc2",
+            "arn:aws:ec2:us-east-1:273517699789:subnet/subnet-06ac38ae6a72b8bff",
+            "arn:aws:ec2:us-east-1:273517699789:subnet/subnet-07aa04ba2ad854a44",
+            "arn:aws:ec2:us-east-1:273517699789:subnet/subnet-0bfefa6b0f02e17b6"
           ]
         }
       }
