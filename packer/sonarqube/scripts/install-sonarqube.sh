@@ -138,6 +138,16 @@ if [[ -z "$SONARQUBE_JAR" ]]; then
   exit 1
 fi
 
+if [[ ! -f /tmp/project-3-start-sonarqube ]]; then
+  echo "Packer did not stage the SonarQube startup launcher." >&2
+  exit 1
+fi
+
+install -o root -g root -m 0755 \
+  /tmp/project-3-start-sonarqube \
+  /usr/local/sbin/project-3-start-sonarqube
+rm -f /tmp/project-3-start-sonarqube
+
 cat > /etc/sysctl.d/99-sonarqube.conf <<'EOF'
 vm.max_map_count=524288
 fs.file-max=131072
@@ -145,7 +155,7 @@ EOF
 
 sysctl --system
 
-cat > /etc/systemd/system/sonarqube.service <<EOF
+cat > /etc/systemd/system/sonarqube.service <<'EOF'
 [Unit]
 Description=SonarQube Community Build
 After=network-online.target
@@ -156,7 +166,7 @@ Type=simple
 User=sonarqube
 Group=sonarqube
 WorkingDirectory=/opt/sonarqube
-ExecStart=/usr/bin/java -Xms32m -Xmx32m -Djava.net.preferIPv4Stack=true -jar ${SONARQUBE_JAR}
+ExecStart=/usr/local/sbin/project-3-start-sonarqube
 SuccessExitStatus=143
 Restart=on-failure
 RestartSec=10
@@ -171,6 +181,7 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
+systemctl enable sonarqube.service
 
 echo "SonarQube ${SONARQUBE_VERSION} and AWS CLI ${AWS_CLI_VERSION} installed."
-echo "SonarQube service remains disabled until RDS configuration is supplied at launch."
+echo "Baked systemd service retrieves DB settings from instance metadata and credentials from Secrets Manager at startup."
