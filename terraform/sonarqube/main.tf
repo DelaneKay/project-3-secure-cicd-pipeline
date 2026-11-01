@@ -82,14 +82,14 @@ resource "aws_instance" "sonarqube" {
   }
 
   tags = {
-    Name                     = "${var.project_name}-sonarqube"
-    Project                  = var.project_name
-    Environment              = "lab"
-    ManagedBy                = "Terraform"
-    Image                    = "sonarqube"
-    "sonarqube-db-host"      = data.terraform_remote_state.database.outputs.db_address
-    "sonarqube-db-port"      = tostring(data.terraform_remote_state.database.outputs.db_port)
-    "sonarqube-db-name"      = var.sonarqube_db_name
+    Name                      = "${var.project_name}-sonarqube"
+    Project                   = var.project_name
+    Environment               = "lab"
+    ManagedBy                 = "Terraform"
+    Image                     = "sonarqube"
+    "sonarqube-db-host"       = data.terraform_remote_state.database.outputs.db_address
+    "sonarqube-db-port"       = tostring(data.terraform_remote_state.database.outputs.db_port)
+    "sonarqube-db-name"       = var.sonarqube_db_name
     "sonarqube-db-secret-arn" = data.terraform_remote_state.database.outputs.master_user_secret_arn
   }
 
