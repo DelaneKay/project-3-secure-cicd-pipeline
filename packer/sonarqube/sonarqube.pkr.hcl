@@ -114,4 +114,18 @@ build {
     script          = "${path.root}/scripts/install-cloudwatch-agent.sh"
     execute_command = "sudo -E bash '{{ .Path }}'"
   }
+  # Run last so the image is checked after every installation provisioner.
+  provisioner "shell" {
+    inline = [
+      "set -eu",
+      "test -d /usr/local/aws-cli",
+      "chown -R root:root /usr/local/aws-cli",
+      "chmod -R a+rX,u+w,go-w /usr/local/aws-cli",
+      "test -x /usr/local/aws-cli/v2/current/bin/aws",
+      "runuser -u sonarqube -- /bin/bash -c 'test -x /usr/local/aws-cli/v2/current/bin/aws && /usr/local/aws-cli/v2/current/bin/aws --version'",
+      "systemctl is-enabled sonarqube.service",
+    ]
+    execute_command = "sudo -E bash '{{ .Path }}'"
+  }
+
 }
