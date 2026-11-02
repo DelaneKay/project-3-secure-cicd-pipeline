@@ -71,8 +71,24 @@ if [[ -z "${DB_HOST}" || -z "${DB_NAME}" || -z "${SECRET_ARN}" ]]; then
   exit 1
 fi
 
-if ! command -v aws >/dev/null 2>&1; then
-  log "AWS CLI is not available in the service environment."
+AWS_CLI_BIN=""
+for candidate in \
+  /usr/local/aws-cli/v2/current/bin/aws \
+  /usr/local/bin/aws \
+  /usr/bin/aws; do
+  if [[ -x "$candidate" ]]; then
+    AWS_CLI_BIN="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$AWS_CLI_BIN" ]]; then
+  log "AWS CLI executable was not found in its expected installation paths."
+  exit 1
+fi
+
+if ! "$AWS_CLI_BIN" --version >/dev/null 2>&1; then
+  log "AWS CLI executable was found but could not run."
   exit 1
 fi
 
@@ -83,7 +99,7 @@ SECRET_JSON=""
 for ((attempt = 1; attempt <= MAX_SECRET_ATTEMPTS; attempt++)); do
   : >"${AWS_ERROR_FILE}"
 
-  if SECRET_JSON="$(aws secretsmanager get-secret-value \
+  if SECRET_JSON="$("$AWS_CLI_BIN" secretsmanager get-secret-value \
       --region "${AWS_REGION}" \
       --secret-id "${SECRET_ARN}" \
       --query SecretString \
