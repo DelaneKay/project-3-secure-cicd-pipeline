@@ -189,6 +189,16 @@ useradd \
   --shell /usr/sbin/nologin \
   sonarqube 2>/dev/null || true
 
+# Keep the AWS CLI private to the SonarQube service group while allowing the
+# service account to traverse its directories, read its runtime files, and run it.
+chgrp -R sonarqube /usr/local/aws-cli
+chmod -R g+rX,g-w,o-rwx /usr/local/aws-cli
+
+if ! runuser -u sonarqube -- "$AWS_CLI_BIN" --version; then
+  echo "AWS CLI cannot run as the sonarqube service user." >&2
+  exit 1
+fi
+
 unzip -q "$WORK_DIR/sonarqube.zip" -d /opt
 SONARQUBE_HOME="/opt/sonarqube-${SONARQUBE_VERSION}"
 ln -sfn "$SONARQUBE_HOME" /opt/sonarqube
