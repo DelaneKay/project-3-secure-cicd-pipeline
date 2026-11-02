@@ -1,2 +1,2 @@
-AMI_ID=ami-0651b0f6f1c275301
+AMI_ID=ami-03ed34d45f18f6c37
 AWS_REGION=us-east-1
