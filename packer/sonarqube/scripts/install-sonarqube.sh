@@ -148,6 +148,14 @@ if [[ "$aws_cli_output" != "aws-cli/${AWS_CLI_VERSION}"* ]]; then
   exit 1
 fi
 
+AWS_CLI_BIN="/usr/local/aws-cli/v2/current/bin/aws"
+if [[ ! -x "$AWS_CLI_BIN" ]]; then
+  echo "AWS CLI executable is missing from the expected installation path: $AWS_CLI_BIN" >&2
+  exit 1
+fi
+
+"$AWS_CLI_BIN" --version
+
 download \
   "SonarQube v${SONARQUBE_VERSION} archive" \
   "$SONARQUBE_URL" \
