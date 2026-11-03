@@ -1,0 +1,86 @@
+name: Juice Shop Dependency-Check
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/dependency-check.yml"
+      - "scripts/report-dependency-check.py"
+      - "packer/juice-shop/**"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: juice-shop-dependency-check
+  cancel-in-progress: false
+jobs:
+  scan:
+    if: github.ref == 'refs/heads/master'
+    environment: dependency-check
+    runs-on: [self-hosted, linux, x64, project-3-scanner]
+    timeout-minutes: 180
+    steps:
+      - name: Check out reporting automation
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: automation
+          persist-credentials: false
+      - name: Check out Juice Shop source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: juice-shop/juice-shop
+          ref: v20.3.0
+          path: juice-shop
+          persist-credentials: false
+      - name: Verify source and tools
+        working-directory: juice-shop
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -c 'import json; assert json.load(open("package.json"))["version"] == "20.3.0"'
+          test -f package-lock.json
+          npm --version
+          dependency-check --version
+          mkdir -p "$RUNNER_TEMP/dependency-check-report"
+          git rev-parse HEAD > "$RUNNER_TEMP/dependency-check-report/source-commit.txt"
+      - name: Scan application dependencies
+        id: scan
+        shell: bash
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          report="$RUNNER_TEMP/dependency-check-report"
+          mkdir -p "$report" "$HOME/.cache/project-3/dependency-check"
+          properties="$(mktemp "$RUNNER_TEMP/odc.XXXXXXXX")"
+          trap 'rm -f "$properties"' EXIT
+          if [ -n "$NVD_API_KEY" ]; then
+            [[ "$NVD_API_KEY" =~ ^[a-zA-Z0-9-]+$ ]] || { echo "Invalid NVD key format" >&2; exit 1; }
+            printf 'nvd.api.key=%s\\n' "$NVD_API_KEY" > "$properties"
+          fi
+          dependency-check \
+            --project "Project 3 Juice Shop 20.3.0" \
+            --scan "$GITHUB_WORKSPACE/juice-shop" \
+            --data "$HOME/.cache/project-3/dependency-check" \
+            --propertyfile "$properties" \
+            --format JSON --format HTML \
+            --out "$report"
+          test -s "$report/dependency-check-report.json"
+      - name: Export and publish summary
+        if: always()
+        env:
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
+          REPORT_DIR: ${{ runner.temp }}/dependency-check-report
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 automation/scripts/report-dependency-check.py
+      - name: Upload Dependency-Check reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dependency-check-results
+          path: ${{ runner.temp }}/dependency-check-report/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Clean report workspace
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/dependency-check-report"
