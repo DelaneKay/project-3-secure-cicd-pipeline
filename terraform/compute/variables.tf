@@ -20,7 +20,7 @@ variable "juice_shop_instance_type" {
 
 variable "runner_instance_type" {
   type    = string
-  default = "t3.small"
+  default = "c7i-flex.large"
 }
 
 variable "runner_registration_token_parameter" {
