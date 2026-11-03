@@ -18,6 +18,11 @@ jobs:
     runs-on: [self-hosted, linux, x64, project-3-scanner]
     timeout-minutes: 30
     steps:
+      - name: Check out reporting automation
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: automation
+          persist-credentials: false
       - name: Check out matching Juice Shop release source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -36,6 +41,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/sonar-receipt"
           git rev-parse HEAD > "$RUNNER_TEMP/sonar-receipt/source-commit.txt"
       - name: Submit application analysis
+        id: scan
         working-directory: juice-shop
         shell: bash
         env:
@@ -55,11 +61,20 @@ jobs:
           cp .scannerwork/report-task.txt "$RUNNER_TEMP/sonar-receipt/report-task.txt"
           echo "Analysis submitted. Server processing and findings must be reviewed in SonarQube." >> "$GITHUB_STEP_SUMMARY"
           echo "Quality gate results do not block deployment in this lab." >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload analysis submission receipt
+      - name: Export findings and publish aggregate summaries
+        if: always()
+        env:
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+          SONAR_REPORT_TOKEN: ${{ secrets.SONAR_REPORT_TOKEN }}
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
+          REPORT_DIR: ${{ runner.temp }}/sonar-receipt
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 automation/scripts/report-sonarqube.py
+      - name: Upload scan results and receipt
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: sonarqube-analysis-submission
+          name: sonarqube-results
           path: ${{ runner.temp }}/sonar-receipt/
           retention-days: 7
           if-no-files-found: ignore
