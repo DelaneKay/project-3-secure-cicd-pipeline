@@ -25,7 +25,16 @@ resource "aws_instance" "juice_shop" {
   })
 }
 
+resource "terraform_data" "runner_instance_type" {
+  triggers_replace = var.runner_instance_type
+}
+
 resource "aws_instance" "github_runner" {
+  # Replace from the AMI when sizing changes, preserving immutable deployment.
+  lifecycle {
+    replace_triggered_by = [terraform_data.runner_instance_type]
+  }
+
   ami                         = data.aws_ami.github_runner.id
   instance_type               = var.runner_instance_type
   subnet_id                   = data.terraform_remote_state.network.outputs.public_subnet_ids[0]
