@@ -46,19 +46,30 @@ existing = api("/api/projects/search?" + urllib.parse.urlencode({"projects": pro
 if not any(item["key"] == project for item in existing.get("components", [])):
     api("/api/projects/create", {"project": project, "name": "Project 3 OWASP Juice Shop", "visibility": "private"})
 
-# Juice Shop uses JavaScript, TypeScript, HTML and CSS. Resolve profiles by
-# language and name; stop if the installed server does not provide the profile.
-assigned = []
+# Use the installed version's built-in defaults rather than hard-coded names.
+# Default profiles apply automatically; SonarQube may prohibit explicit binding
+# to a default profile, so verify the project's effective profile instead.
+selected = {}
 for language in ("js", "ts", "web", "css"):
     profiles = api("/api/qualityprofiles/search?" + urllib.parse.urlencode({"language": language}))
-    matches = [p for p in profiles.get("profiles", []) if p["name"] == "Sonar way" and p["language"] == language]
-    if len(matches) != 1:
-        raise SystemExit(f"Expected exactly one Sonar way profile for {language}.")
-    api("/api/qualityprofiles/add_project",
-        {"project": project, "language": language, "qualityProfile": "Sonar way"})
-    assigned.append(language)
+    defaults = [p for p in profiles.get("profiles", [])
+                if p.get("language") == language and p.get("isDefault") is True
+                and p.get("isBuiltIn") is True]
+    if len(defaults) != 1:
+        raise SystemExit(f"Expected one built-in default profile for {language}.")
+    chosen = defaults[0]
+    effective = api("/api/qualityprofiles/search?" + urllib.parse.urlencode(
+        {"project": project, "language": language}))
+    matches = [p for p in effective.get("profiles", [])
+               if p.get("language") == language]
+    if len(matches) != 1 or matches[0].get("key") != chosen["key"]:
+        raise SystemExit(
+            f"Project profile for {language} differs from the built-in default; review its explicit association.")
+    selected[language] = {"name": chosen["name"], "key": chosen["key"],
+                          "activeRuleCount": chosen.get("activeRuleCount")}
+    print(f"{language}: verified effective profile {chosen['name']}")
 
 with open("sonarqube-setup.json", "w", encoding="utf-8") as report:
-    json.dump({"project": project, "profiles": {lang: "Sonar way" for lang in assigned},
+    json.dump({"project": project, "profiles": selected,
                "mode": "report-only", "setup": "complete"}, report, indent=2)
-print("SonarQube project and quality profiles reconciled successfully.")
+print("SonarQube project and effective default profiles verified successfully.")
