@@ -90,6 +90,19 @@ resource "aws_iam_role_policy" "runner_runtime" {
       },
       {
         Effect   = "Allow"
+        Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
+        Resource = "arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key/*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "sns.${var.aws_region}.amazonaws.com"
+          }
+          "ForAnyValue:StringEquals" = {
+            "kms:ResourceAliases" = "alias/aws/sns"
+          }
+        }
+      },
+      {
+        Effect   = "Allow"
         Action   = ["sns:Publish"]
         Resource = data.terraform_remote_state.observability.outputs.scan_findings_topic_arn
       },
