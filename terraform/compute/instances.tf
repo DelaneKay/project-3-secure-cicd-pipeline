@@ -26,7 +26,10 @@ resource "aws_instance" "juice_shop" {
 }
 
 resource "terraform_data" "runner_instance_type" {
-  triggers_replace = var.runner_instance_type
+  triggers_replace = {
+    instance_type = var.runner_instance_type
+    revision      = "immutable-sizing-v2"
+  }
 }
 
 resource "aws_instance" "github_runner" {
