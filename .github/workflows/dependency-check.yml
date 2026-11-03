@@ -37,7 +37,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           python3 -c 'import json; assert json.load(open("package.json"))["version"] == "20.3.0"'
-          test -f package-lock.json
+          echo "Source release has no top-level lockfile; scanning the packaged release artifact."
           npm --version
           dependency-check --version
           mkdir -p "$RUNNER_TEMP/dependency-check-report"
@@ -52,15 +52,31 @@ jobs:
           umask 077
           report="$RUNNER_TEMP/dependency-check-report"
           mkdir -p "$report" "$HOME/.cache/project-3/dependency-check"
+          archive="$RUNNER_TEMP/juice-shop-20.3.0.tgz"
+          unpack="$RUNNER_TEMP/juice-shop-artifact"
+          rm -rf -- "$unpack"
+          mkdir -p "$unpack"
+          curl --fail --location --retry 3 --silent --show-error \
+            "https://github.com/juice-shop/juice-shop/releases/download/v20.3.0/juice-shop-20.3.0_node22_linux_x64.tgz" \
+            --output "$archive"
+          printf '%s  %s\n' '6148dcce8fe7d990a86bf8457a0e9a07821c127d498c76da1a3bc7dba12a77e5' "$archive" | sha256sum --check --strict
+          tar -xzf "$archive" -C "$unpack"
+          package_json="$(find "$unpack" -maxdepth 3 -type f -name package.json -print -quit)"
+          test -n "$package_json"
+          app_dir="$(dirname "$package_json")"
+          test -d "$app_dir/node_modules"
+          python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["version"] == "20.3.0"' "$package_json"
           properties="$(mktemp "$RUNNER_TEMP/odc.XXXXXXXX")"
           trap 'rm -f "$properties"' EXIT
           if [ -n "$NVD_API_KEY" ]; then
             [[ "$NVD_API_KEY" =~ ^[a-zA-Z0-9-]+$ ]] || { echo "Invalid NVD key format" >&2; exit 1; }
-            printf 'nvd.api.key=%s\\n' "$NVD_API_KEY" > "$properties"
+            printf 'nvd.api.key=%s\n' "$NVD_API_KEY" > "$properties"
           fi
+          printf 'ecosystem.skip.cpeanalyzer=\n' >> "$properties"
           dependency-check \
+            --disableNodeAudit --disableYarnAudit --disablePnpmAudit \
             --project "Project 3 Juice Shop 20.3.0" \
-            --scan "$GITHUB_WORKSPACE/juice-shop" \
+            --scan "$app_dir" \
             --data "$HOME/.cache/project-3/dependency-check" \
             --propertyfile "$properties" \
             --format JSON --format HTML \
@@ -83,4 +99,4 @@ jobs:
           retention-days: 7
       - name: Clean report workspace
         if: always()
-        run: rm -rf -- "$RUNNER_TEMP/dependency-check-report"
+        run: rm -rf -- "$RUNNER_TEMP/dependency-check-report" "$RUNNER_TEMP/juice-shop-artifact" "$RUNNER_TEMP/juice-shop-20.3.0.tgz"
