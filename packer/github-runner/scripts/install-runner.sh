@@ -16,7 +16,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get upgrade -y
 apt-get install -y --no-install-recommends \
-  ca-certificates curl unzip tar gzip jq git gnupg dirmngr wget \
+  ca-certificates curl unzip tar gzip xz-utils jq git gnupg dirmngr wget \
   "${JAVA_PACKAGE}" \
   libicu74 libkrb5-3 zlib1g libssl3 libcurl4 liblttng-ust1 \
   libunwind8 libnuma1 libsecret-1-0 libgtk-3-0 libdbus-glib-1-2 \
@@ -132,6 +132,24 @@ unzip -q "$sonar_zip" -d /opt/project-3/tools
 ln -sfn \
   "/opt/project-3/tools/sonar-scanner-${SONAR_SCANNER_VERSION}-linux-x64/bin/sonar-scanner" \
   /usr/local/bin/sonar-scanner
+
+# Install the Node.js runtime required by Dependency-Check's npm audit analyzer.
+# Verify the archive using the matching official Node.js checksum manifest.
+node_version="22.23.4"
+node_archive="node-v${node_version}-linux-x64.tar.xz"
+download "https://nodejs.org/dist/v${node_version}/${node_archive}" "$node_archive"
+download "https://nodejs.org/dist/v${node_version}/SHASUMS256.txt" node-SHASUMS256.txt
+grep -F "  ${node_archive}" node-SHASUMS256.txt > node-check.txt
+test -s node-check.txt
+sha256sum --check node-check.txt
+install -d -m 0755 "/opt/node-v${node_version}"
+tar -xJf "$node_archive" --strip-components=1 -C "/opt/node-v${node_version}"
+chown -R root:root "/opt/node-v${node_version}"
+chmod -R a+rX,u+w,go-w "/opt/node-v${node_version}"
+ln -sfn "/opt/node-v${node_version}/bin/node" /usr/local/bin/node
+ln -sfn "/opt/node-v${node_version}/bin/npm" /usr/local/bin/npm
+runuser -u actions-runner -- /usr/local/bin/node --version
+runuser -u actions-runner -- /usr/local/bin/npm --version
 
 # OWASP Dependency-Check. Verify its release signature.
 dependency_check_zip="dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip"
