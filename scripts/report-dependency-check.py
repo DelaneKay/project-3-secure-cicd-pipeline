@@ -23,6 +23,8 @@ try:
         raise RuntimeError("Scanner failed")
     report = json.loads((out / "dependency-check-report.json").read_text())
     dependencies = report["dependencies"]
+    if not dependencies:
+        raise RuntimeError("Scan returned no dependencies")
     counts = collections.Counter()
     vulnerable = 0
     count = 0
@@ -33,7 +35,7 @@ try:
         for entry in entries:
             count += 1
             counts[str(entry.get("severity") or "UNKNOWN").upper()] += 1
-    summary.update(status="completed", dependencies=len(dependencies),
+    summary.update(status="completed_limited_coverage", coverage="packaged Node.js dependencies; no top-level lockfile; npm audit unavailable; false negatives possible", dependencies=len(dependencies),
                    vulnerable_dependencies=vulnerable,
                    vulnerability_occurrences=count, severities=dict(counts))
 except Exception as error:
@@ -43,7 +45,7 @@ except Exception as error:
 
 (out / "summary.json").write_text(json.dumps(summary, indent=2))
 with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as step_summary:
-    step_summary.write("### Dependency-Check result\\n\\n" + json.dumps(summary) + "\\n")
+    step_summary.write("### Dependency-Check result\n\n" + json.dumps(summary) + "\n")
 
 def aws(*args):
     result = subprocess.run(["aws", "--region", "us-east-1", *args],
