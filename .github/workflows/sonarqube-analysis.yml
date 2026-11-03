@@ -1,0 +1,70 @@
+name: Juice Shop SonarQube analysis
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/sonarqube-analysis.yml"
+      - "packer/juice-shop/**"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: juice-shop-sonarqube-analysis
+  cancel-in-progress: false
+jobs:
+  analyze:
+    if: github.ref == 'refs/heads/master'
+    environment: sonarqube-scan
+    runs-on: [self-hosted, linux, x64, project-3-scanner]
+    timeout-minutes: 30
+    steps:
+      - name: Check out matching Juice Shop release source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: juice-shop/juice-shop
+          ref: v20.3.0
+          path: juice-shop
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify source version and scanner
+        working-directory: juice-shop
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -c 'import json; assert json.load(open("package.json"))["version"] == "20.3.0"'
+          sonar-scanner --version
+          mkdir -p "$RUNNER_TEMP/sonar-receipt"
+          git rev-parse HEAD > "$RUNNER_TEMP/sonar-receipt/source-commit.txt"
+      - name: Submit application analysis
+        working-directory: juice-shop
+        shell: bash
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$SONAR_TOKEN"
+          test -n "$SONAR_HOST_URL"
+          sonar-scanner \
+            -Dsonar.projectKey=project-3-juice-shop \
+            -Dsonar.projectVersion=20.3.0 \
+            -Dsonar.sources=. \
+            -Dsonar.exclusions='**/node_modules/**,**/dist/**,**/coverage/**,**/.scannerwork/**' \
+            -Dsonar.sourceEncoding=UTF-8 \
+            -Dsonar.qualitygate.wait=false
+          cp .scannerwork/report-task.txt "$RUNNER_TEMP/sonar-receipt/report-task.txt"
+          echo "Analysis submitted. Server processing and findings must be reviewed in SonarQube." >> "$GITHUB_STEP_SUMMARY"
+          echo "Quality gate results do not block deployment in this lab." >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload analysis submission receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sonarqube-analysis-submission
+          path: ${{ runner.temp }}/sonar-receipt/
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Clean scanner workspace
+        if: always()
+        shell: bash
+        run: |
+          rm -rf -- "$GITHUB_WORKSPACE/juice-shop/.scannerwork" "$RUNNER_TEMP/sonar-receipt"
