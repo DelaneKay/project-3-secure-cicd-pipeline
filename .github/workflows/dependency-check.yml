@@ -67,7 +67,8 @@ jobs:
           test -d "$app_dir/node_modules"
           python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["version"] == "20.3.0"' "$package_json"
           properties="$(mktemp "$RUNNER_TEMP/odc.XXXXXXXX")"
-          trap 'rm -f "$properties"' EXIT
+          diagnostic_log="$(mktemp "$RUNNER_TEMP/odc-log.XXXXXXXX")"
+          trap 'rm -f "$properties" "$diagnostic_log"' EXIT
           if [ -z "$NVD_API_KEY" ]; then
             echo "NVD_API_KEY is missing from the dependency-check environment; configure it before retrying." >&2
             exit 1
@@ -76,7 +77,8 @@ jobs:
           printf 'nvd.api.key=%s\n' "$NVD_API_KEY" > "$properties"
           unset NVD_API_KEY
           printf 'ecosystem.skip.cpeanalyzer=\n' >> "$properties"
-          dependency-check \
+          set +e
+          dependency-check --log "$diagnostic_log" \
             --disableNodeAudit --disableYarnAudit --disablePnpmAudit \
             --project "Project 3 Juice Shop 20.3.0" \
             --scan "$app_dir" \
@@ -84,6 +86,13 @@ jobs:
             --propertyfile "$properties" \
             --format JSON --format HTML \
             --out "$report"
+          scan_status=$?
+          set -e
+          if [ "$scan_status" -ne 0 ]; then
+            echo "Dependency-Check failed with exit status $scan_status; exception class and analyzer frames:"
+            python3 -c 'import re,sys; text=open(sys.argv[1], errors="replace").read(); pats=[r"(?<![A-Za-z0-9_$])(?:[a-zA-Z_$][\\w$]*\\.)+[A-Za-z_$][\\w$]*(?:Exception|Error)\\b", r"(?<=at )org\\.owasp\\.dependencycheck\\.[\\w.$]+"]; matches=[]; [matches.append(m) for pat in pats for m in re.findall(pat,text) if m not in matches]; print("\\n".join(matches[:40]) if matches else "No exception class or Dependency-Check frame recorded.")' "$diagnostic_log"
+            exit "$scan_status"
+          fi
           test -s "$report/dependency-check-report.json"
       - name: Export and publish summary
         if: always()
