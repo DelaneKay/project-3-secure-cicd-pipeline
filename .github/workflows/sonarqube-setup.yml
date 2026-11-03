@@ -1,0 +1,34 @@
+name: SonarQube project setup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sonarqube-project-configuration
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    if: github.ref == 'refs/heads/master'
+    environment: sonarqube-admin
+    runs-on: [self-hosted, linux, x64, project-3-scanner]
+    timeout-minutes: 10
+    env:
+      SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+      SONAR_ADMIN_TOKEN: ${{ secrets.SONAR_ADMIN_TOKEN }}
+    steps:
+      - name: Check out trusted configuration
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Reconcile project and quality profiles
+        run: python3 scripts/configure-sonarqube.py
+      - name: Upload configuration receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sonarqube-setup
+          path: sonarqube-setup.json
+          retention-days: 7
