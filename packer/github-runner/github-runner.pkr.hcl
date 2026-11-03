@@ -132,4 +132,18 @@ build {
 
     execute_command = "sudo -E env {{ .Vars }} bash '{{ .Path }}'"
   }
+  # Final image check: AWS program files contain no credentials and must be
+  # executable by the unprivileged workflow account, with root-only writes.
+  provisioner "shell" {
+    inline = [
+      "set -eu",
+      "test -d /usr/local/aws-cli",
+      "chown -R root:root /usr/local/aws-cli",
+      "chmod -R a+rX,u+w,go-w /usr/local/aws-cli",
+      "echo 'Checking AWS CLI access as actions-runner'",
+      "runuser -u actions-runner -- /bin/bash -c 'test -x /usr/local/bin/aws && /usr/local/bin/aws --version'",
+    ]
+    execute_command = "sudo -E bash '{{ .Path }}'"
+  }
+
 }
