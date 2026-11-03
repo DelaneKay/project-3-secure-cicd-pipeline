@@ -1,0 +1,2 @@
+# AWS CLI public signing-key fingerprint used for package signature verification.
+9d2406ca349dfe9ad1aac51dedc80129a819c226:packer/sonarqube/scripts/install-sonarqube.sh:generic-api-key:9
