@@ -68,10 +68,13 @@ jobs:
           python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["version"] == "20.3.0"' "$package_json"
           properties="$(mktemp "$RUNNER_TEMP/odc.XXXXXXXX")"
           trap 'rm -f "$properties"' EXIT
-          if [ -n "$NVD_API_KEY" ]; then
-            [[ "$NVD_API_KEY" =~ ^[a-zA-Z0-9-]+$ ]] || { echo "Invalid NVD key format" >&2; exit 1; }
-            printf 'nvd.api.key=%s\n' "$NVD_API_KEY" > "$properties"
+          if [ -z "$NVD_API_KEY" ]; then
+            echo "NVD_API_KEY is missing from the dependency-check environment; configure it before retrying." >&2
+            exit 1
           fi
+          [[ "$NVD_API_KEY" =~ ^[a-zA-Z0-9-]+$ ]] || { echo "Invalid NVD key format" >&2; exit 1; }
+          printf 'nvd.api.key=%s\n' "$NVD_API_KEY" > "$properties"
+          unset NVD_API_KEY
           printf 'ecosystem.skip.cpeanalyzer=\n' >> "$properties"
           dependency-check \
             --disableNodeAudit --disableYarnAudit --disablePnpmAudit \
