@@ -76,7 +76,7 @@ jobs:
           [[ "$NVD_API_KEY" =~ ^[a-zA-Z0-9-]+$ ]] || { echo "Invalid NVD key format" >&2; exit 1; }
           printf 'nvd.api.key=%s\n' "$NVD_API_KEY" > "$properties"
           unset NVD_API_KEY
-          printf 'ecosystem.skip.cpeanalyzer=\n' >> "$properties"
+          printf 'ecosystem.skip.cpeanalyzer=[]\n' >> "$properties"
           set +e
           dependency-check --log "$diagnostic_log" \
             --disableNodeAudit --disableYarnAudit --disablePnpmAudit \
