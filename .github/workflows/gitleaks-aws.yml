@@ -31,6 +31,7 @@ jobs:
           persist-credentials: false
 
       - name: Scan Git history with Gitleaks
+        id: scan
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -62,11 +63,20 @@ jobs:
             Tags
           })' "$raw_report" > reports/gitleaks.json
 
+      - name: Publish Gitleaks summary
+        if: always()
+        env:
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/report-gitleaks.py
+
       - name: Upload sanitized Gitleaks report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: gitleaks-aws-report
-          path: reports/gitleaks.json
+          path: |
+            reports/gitleaks.json
+            reports/summary.json
           if-no-files-found: ignore
           retention-days: 7
