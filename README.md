@@ -338,6 +338,179 @@ Dependency-Check initially failed because of a missing NVD key, then because an 
 
 Those problems were useful: they showed me the difference between **infrastructure creation, service readiness, scanner execution and security findings**. Each needs its own verification.
 
+## Challenges I faced and how I solved them
+
+I kept this section separate from the setup walkthrough. These commands are diagnostics I used or adapted from the investigation; they are not all required for every deployment. Replace placeholder IDs with the current resources, and avoid putting passwords, tokens or raw secret findings in logs.
+
+### 1. Packer could not find valid AWS credentials
+
+**What happened:** My IAM user could call AWS CLI, but Packer failed with `No valid credential sources found`. An AWS CLI login session did not automatically give Packer the credentials it expected.
+
+**How I investigated:** I checked the caller identity under each profile instead of assuming that an interactive login and a machine process were using the same identity.
+
+```bash
+aws sts get-caller-identity --profile mds-devsecops-lab --query Arn --output text
+aws sts get-caller-identity --profile project-3-packer --query Arn --output text
+```
+
+**How I resolved it:** I configured the Packer profile to assume a dedicated operator role using short-lived source credentials. I kept that operator role separate from the SSM role attached to the temporary builder. The intended caller for a build is the assumed operator role, not the root user. The setup is documented in [Packer IAM bootstrap](docs/packer-builder-iam-bootstrap.md).
+
+### 2. GitHub Actions could not assume the Terraform role
+
+**What happened:** The Terraform plan job failed with `Not authorized to perform sts:AssumeRoleWithWebIdentity`.
+
+**How I investigated:** I compared the role's OIDC trust conditions with the repository and environment that triggered the workflow. GitHub's token subject for this repository used immutable owner and repository identifiers, while the trust policy initially did not match it.
+
+```bash
+aws iam get-role \
+  --profile mds-devsecops-lab \
+  --role-name project-3-terraform-plan-role \
+  --query 'Role.AssumeRolePolicyDocument' \
+  --output json
+
+aws iam get-role \
+  --profile mds-devsecops-lab \
+  --role-name project-3-terraform-apply-role \
+  --query 'Role.AssumeRolePolicyDocument' \
+  --output json
+```
+
+**How I resolved it:** I corrected the exact repository, branch and environment subject claims in the relevant trust policies. The plan role and apply role remain separate, and the apply role is tied to the protected environment. I documented the policy setup in [GitHub Actions Terraform setup](docs/github-actions-terraform-setup.md).
+
+### 3. Terraform could not launch EC2 after I rebuilt the VPC
+
+**What happened:** `ec2:RunInstances` returned an authorization error for the network interface, subnet and security group even though the role could create the instance in an earlier deployment.
+
+**How I investigated:** I used AWS's authorization details and compared the current VPC and subnet IDs with the conditions in the deployed role policy.
+
+```bash
+aws ec2 describe-vpcs \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --filters 'Name=tag:Project,Values=project-3-secure-cicd-pipeline' \
+  --query 'Vpcs[].{VpcId:VpcId,Cidr:CidrBlock}' --output table
+
+aws ec2 describe-subnets \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --filters 'Name=vpc-id,Values=vpc-REPLACE' \
+  --query 'Subnets[].{SubnetId:SubnetId,VpcId:VpcId,Cidr:CidrBlock}' --output table
+
+aws iam get-role-policy \
+  --profile mds-devsecops-lab \
+  --role-name project-3-terraform-apply-role \
+  --policy-name project-3-terraform-apply-policy \
+  --query "PolicyDocument.Statement[?Sid=='LaunchInterfacesInLabVpc']" \
+  --output json
+```
+
+**How I resolved it:** Destroying and recreating the network gave me new IDs, but the bootstrap apply-role policy still referred to the old ones. I updated the policy with the current lab VPC and subnets, applied it with the IAM-user profile, and generated a fresh Terraform plan. This remains a manual dependency after network recreation; it is an improvement to automate rather than a solved long-term design.
+
+I also encountered the IAM inline-policy size limit. I checked the policy's size excluding formatting whitespace and reduced duplication instead of attaching broad administrator permissions.
+
+### 4. A Terraform plan became stale and a database resource already existed
+
+**What happened:** One apply reported `Saved plan is stale` after state changed, and a later run reported that the RDS subnet group already existed. I also encountered a state-lock conflict while operations overlapped.
+
+**How I investigated:** I checked the active GitHub Actions runs, the AWS resource and the Terraform state relationship. A resource existing in AWS does not by itself mean it is recorded in the correct Terraform state.
+
+```bash
+gh run list --workflow terraform-deploy.yml --limit 5
+
+aws rds describe-db-subnet-groups \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --db-subnet-group-name project-3-sonarqube-subnets \
+  --query 'DBSubnetGroups[].{Name:DBSubnetGroupName,VpcId:VpcId,Status:SubnetGroupStatus}' \
+  --output json
+
+aws rds describe-db-instances \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --db-instance-identifier project-3-sonarqube \
+  --query 'DBInstances[].{Identifier:DBInstanceIdentifier,Status:DBInstanceStatus}' \
+  --output table
+```
+
+**How I resolved it:** I stopped overlapping operations and used the repository's database import workflow to reconcile the existing resources with their intended state. I then generated a **new plan** and reviewed it before applying. I did not disable locking to bypass the conflict. If a lock appears abandoned, I first verify that no operation is running before considering a carefully scoped unlock.
+
+### 5. SonarQube started, but its HTTP service was unavailable
+
+**What happened:** EC2 was running and registered with SSM, but the SonarQube health endpoint returned HTTP 000. The process could be active or activating while the web application was not yet ready.
+
+**How I investigated:** I identified the current instance and used SSM to inspect service state and a bounded set of journal entries. A read-only diagnostic is different from configuring a deployed host.
+
+```bash
+aws ssm send-command \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --instance-ids i-REPLACE_WITH_CURRENT_SONARQUBE_ID \
+  --document-name AWS-RunShellScript \
+  --parameters 'commands=["systemctl is-active sonarqube.service || true","journalctl -u sonarqube.service -n 40 --no-pager"]' \
+  --query 'Command.CommandId' --output text
+```
+
+I retrieved the result with `aws ssm get-command-invocation`, using the returned command ID and the same instance ID. I avoided sharing database credentials or printing secret values.
+
+**How I resolved it:** The SonarQube service account could not execute the AWS CLI installed under root-owned directories. I fixed the file permissions and executable-path checks **in the Packer image build**, built a new AMI, and replaced the instance through Terraform. I then confirmed SonarQube's health endpoint returned `UP`. I later applied the same lesson to the scanner runner when its AWS CLI permissions prevented CloudWatch/SNS reporting.
+
+### 6. The scanner ran out of memory
+
+**What happened:** A SonarQube analysis failed on the original `t3.small` scanner. The operating system's out-of-memory killer terminated a process used by the Actions runner.
+
+**How I investigated:** I used SSM for read-only memory and kernel-log checks:
+
+```bash
+aws ssm send-command \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --instance-ids i-REPLACE_WITH_CURRENT_RUNNER_ID \
+  --document-name AWS-RunShellScript \
+  --parameters 'commands=["free -m","journalctl -k --no-pager | grep -i -E \"out of memory|oom-kill|killed process\" | tail -20"]' \
+  --query 'Command.CommandId' --output text
+```
+
+**How I resolved it:** I changed the runner size to `c7i-flex.large` and used Terraform to replace the instance, preserving the immutable approach. I then confirmed the new runner registered online and reran the analysis successfully. A larger runner costs more, so I account for its running time in the lab budget.
+
+### 7. Dependency-Check failed before producing a trustworthy result
+
+**What happened:** First the NVD update failed because the API key was empty. After correcting that, the scan wrote reports but exited with analyzer initialization errors. Treating those partial reports as a clean scan would have been misleading.
+
+**How I investigated:** I opened the failed GitHub Actions job, checked the scanner output and added a diagnostic that printed exception class names without exposing the NVD key. The diagnostic showed `StringIndexOutOfBoundsException` in `Settings.getArray`.
+
+```bash
+gh run list --workflow dependency-check.yml --limit 5
+
+# Replace with the numeric ID of the run being investigated.
+gh run view RUN_ID --log-failed
+```
+
+**How I resolved it:** I stored the NVD key in the appropriate GitHub environment secret and changed the CPE skip setting from an empty string to an empty array:
+
+```properties
+ecosystem.skip.cpeanalyzer=[]
+```
+
+A subsequent run showed that the Node Package and CPE analyzers finished. I still label its results **limited coverage** because this release artifact has no top-level lockfile and the npm/Yarn/pnpm audit analyzers are disabled.
+
+### 8. Gitleaks reported a public-key fingerprint
+
+**What happened:** Gitleaks flagged a historical line as a possible generic API key. A finding is a lead for investigation, not proof that the value is a live credential.
+
+**How I investigated:** I checked the variable name at the reported commit and line without printing the value:
+
+```bash
+git show '9d2406ca349dfe9ad1aac51dedc80129a819c226:packer/sonarqube/scripts/install-sonarqube.sh' \
+  | sed -n '9p' \
+  | cut -d= -f1
+```
+
+The line was the AWS CLI signing-key fingerprint, which is a public verification value. I handled it as a narrowly scoped false positive and reran the scan. If a finding were a real secret, I would revoke or rotate it and investigate exposure rather than simply suppressing it.
+
+### 9. GitHub CLI timed out, but the workflow had run
+
+**What happened:** WSL sometimes returned `TLS handshake timeout` while contacting GitHub. That was a connectivity failure from my terminal, not evidence that the GitHub Actions job itself had failed.
+
+**How I resolved it:** I checked the run directly under **GitHub → Actions** in the browser, opened the relevant job and reviewed its logs and artifacts. Once connectivity was restored I could use `gh run list` and `gh run view` again.
+
+### What these challenges taught me
+
+I learned to verify the identity making a request, read the exact AWS authorization decision, check Terraform state before retrying, and separate instance status from application readiness. Most importantly, I corrected image and workflow definitions and retested them instead of silently changing the running application host.
+
 ## Repository guide
 
 - [Source of truth](LAB-3-SOURCE-OF-TRUTH.md) — agreed project scope and decisions.
