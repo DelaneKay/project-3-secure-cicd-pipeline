@@ -24,7 +24,15 @@ jobs:
           umask 077
           report="$RUNNER_TEMP/project-3-zap-report"
           mkdir -p "$report"
-          target="http://10.20.1.71:3000"
+          # Fail closed unless exactly one running, tagged lab instance is found.
+          instances="$(aws ec2 describe-instances --region us-east-1 \
+            --filters "Name=tag:Project,Values=project-3-secure-cicd-pipeline" \
+                      "Name=tag:Name,Values=project-3-secure-cicd-pipeline-juice-shop" \
+                      "Name=instance-state-name,Values=running" \
+            --query 'Reservations[].Instances[].{ip:PrivateIpAddress,vpc:VpcId}' --output json)"
+          ip="$(printf '%s' "$instances" | python3 -c 'import ipaddress,json,sys; x=json.load(sys.stdin); assert len(x)==1; ip=ipaddress.ip_address(x[0]["ip"]); assert ip in ipaddress.ip_network("10.20.0.0/16"); print(ip)')"
+          target="http://$ip:3000"
+          target_regex="${ip//./[.]}"
           curl --fail --silent --show-error --connect-timeout 5 --max-time 15 "$target/" -o /dev/null
           cat > "$report/plan.yaml" <<EOF
           env:
@@ -33,7 +41,7 @@ jobs:
                 urls:
                   - "$target"
                 includePaths:
-                  - 'http://10[.]20[.]1[.]71:3000/.*'
+                  - 'http://$target_regex:3000/.*'
             parameters:
               failOnError: true
               failOnWarning: false
