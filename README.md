@@ -1,4 +1,61 @@
-# Project 3 — My step-by-step secure CI/CD lab walkthrough
+# My Project 3 Enterprise Secure CI/CD Pipeline: Building, Scanning and Deploying OWASP Juice Shop on AWS
+
+- **Core technologies:** Ubuntu in WSL, Ubuntu 24.04 LTS, AWS, Packer, Terraform, GitHub Actions, an AWS self-hosted scanner runner, OWASP Juice Shop, Gitleaks, SonarQube, OWASP Dependency-Check, OWASP ZAP, CloudWatch Logs and SNS.
+- **Problem addressed:** I wanted to move from running security tools individually to a repeatable pipeline that checks for exposed secrets, source-code issues, vulnerable dependencies and problems in the running application. I also needed reproducible infrastructure, controlled AWS access and evidence showing what each scan actually found.
+- **Outcome:** I built three AMIs, deployed the lab through separate Terraform layers, verified each scanner in its own workflow, and combined the working workflows into one pipeline. The combined run completed successfully and produced scan reports, reviewed Terraform plans, CloudWatch summaries and SNS email notifications. Security findings remained report-only because Juice Shop is intentionally vulnerable; scanner execution and reporting failures remained visible as failures.
+
+I started this project to bring together the infrastructure, security testing and automation work I had been practising in my earlier labs. Running a scanner once was useful, but I wanted to show how those checks could fit into a deployment process that I could run again, review and troubleshoot. I used OWASP Juice Shop as the application so I could work with real findings without having to make a normal application deliberately insecure.
+
+I built the lab in stages. First, I prepared the images and tested the Terraform layers. I then moved routine infrastructure deployment into GitHub Actions, proved that each separate scanning workflow worked, and finally connected them through a combined workflow. I kept the separate workflows because they let me demonstrate each control and investigate one stage without rerunning the entire pipeline. The walkthrough below follows that same progression, including the problems I encountered and the commands I used to investigate them.
+
+## The lab scenario
+
+I used my Windows workstation with Ubuntu in WSL to prepare the repository, authenticate to AWS and run Packer. Packer created separate Ubuntu images for Juice Shop, SonarQube and the scanner runner. Terraform then deployed the network, database, logging and compute resources into AWS. I used Systems Manager for instance access and diagnostics, with no inbound SSH access to the deployed hosts.
+
+I treated the deployed hosts as replaceable infrastructure. When I found missing tools, incorrect permissions or a broken startup path, I changed the image-building code, rebuilt the AMI and replaced the affected instance through Terraform. I used read-only checks to understand failures instead of making a permanent repair on a running server.
+
+The scanning stages answered different questions:
+
+1. **Secrets scanning — Gitleaks:** check the repository history for credentials or other potential secrets, with redacted reports and narrowly scoped handling of a confirmed public-key fingerprint false positive.
+2. **SAST — SonarQube:** inspect the matching Juice Shop source release and record source-code issues without waiting for a quality gate to block deployment.
+3. **SCA — OWASP Dependency-Check:** inspect the packaged application's dependencies for known vulnerabilities. I recorded the limitations caused by the release's missing top-level lockfile rather than claiming complete dependency coverage.
+4. **Infrastructure deployment — Terraform:** create a saved plan for each root, review it, approve the apply and preserve dependency order between the layers.
+5. **DAST — OWASP ZAP:** test the deployed Juice Shop application through a bounded, unauthenticated spider and active scan. This gave me evidence about reachable web behaviour, with the limits of that scan recorded alongside the findings.
+
+I kept the application intentionally vulnerable. My aim was to demonstrate repeatable deployment, security visibility and useful reporting, rather than remove Juice Shop's training vulnerabilities. A completed scan with findings was an expected result; a scanner that could not run or export its results was a separate operational problem that I needed to fix.
+
+## The lab layout
+
+| Component | Role in this project |
+| --- | --- |
+| WSL workstation | Repository work, short-lived AWS login, Packer builds and workflow commands. |
+| GitHub-hosted Terraform runner | Terraform validation, OIDC authentication, saved plans and approved infrastructure changes. |
+| AWS self-hosted scanner runner | Run Gitleaks, SonarScanner, Dependency-Check and ZAP using the tools baked into its AMI. |
+| Juice Shop EC2 host | Run the intentionally vulnerable application on port 3000, with access restricted by the lab's network controls. |
+| SonarQube EC2 host | Receive source analysis and provide the private project dashboard and reporting API on port 9000. |
+| RDS PostgreSQL | Store SonarQube's database separately from the application server. |
+| S3 state backend | Keep each Terraform root's state separate, with versioning, encryption and native state locking. |
+| CloudWatch Logs and SNS | Record aggregate scan summaries and deliver concise email notifications. |
+
+I verified reachability and service health before interpreting scanner output. An unavailable target or HTTP `000` meant I had a connectivity or service problem to investigate; it did not tell me whether the application was free of vulnerabilities. The detailed checks and the trust boundaries appear in the numbered walkthrough.
+
+## The stages I worked through
+
+| Stage | Sequence |
+| --- | --- |
+| [1. Workstation and access](#1-start-my-wsl-project-directory-and-verify-my-aws-identity) | Verify the IAM identity and region → install Packer and the Session Manager plugin → authenticate GitHub and clone the repository. |
+| [2. Image builds](#4-create-the-temporary-builder-role-and-instance-profile) | Create the builder and operator roles → select Ubuntu 24.04 → prepare the build network → build the three AMIs. |
+| [3. Terraform layers](#12-split-terraform-into-independent-roots) | Create separate roots → validate and test networking and the database → move routine deployment into GitHub Actions. |
+| [4. Deployment controls](#16-bootstrap-the-private-remote-state-bucket) | Bootstrap S3 state → configure OIDC and scoped roles → protect apply jobs → review plans and deploy in dependency order. |
+| [5. Separate scanners](#22-run-gitleaks-separately-on-the-aws-runner) | Verify Gitleaks → configure and run SonarQube → test Dependency-Check → verify and run ZAP. |
+| [6. Reporting](#25-export-sonarqube-results-and-verify-cloudwatchsns) | Export reports → publish aggregate CloudWatch events → confirm the SNS subscription → verify email delivery. |
+| [7. Combined pipeline](#30-combine-the-tested-workflows-without-deleting-the-separate-ones) | Reuse the tested workflows → run pre-deployment scans → approve Terraform applies → run ZAP against the deployed application. |
+| [8. Evidence and challenges](#31-verify-the-combined-run-and-preserve-evidence) | Preserve the results → explain trust boundaries → document IAM, state, image, memory and scanner failures and their fixes. |
+
+**Starting point:** I already had AWS CLI, Git and WSL access. I built the image and deployment configuration during this lab, initially tested Terraform manually, and then used GitHub workflows for routine deployment. The combined scanning pipeline assumes that the scanner runner and SonarQube platform are already available; I use the standalone Terraform deployment workflow to bring that platform up first.
+
+## Step-by-step walkthrough
+
 
 > Repository copy: AWS account/resource identifiers, internal host addresses, database endpoints and personal email addresses have been replaced with placeholders. I obtain their real values using the lookup commands shown before running the dependent command. These placeholders are not literal working AWS IDs.
 
