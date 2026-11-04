@@ -1,0 +1,96 @@
+name: Juice Shop ZAP DAST
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: juice-shop-zap-dast
+  cancel-in-progress: false
+jobs:
+  scan:
+    if: github.ref == 'refs/heads/master'
+    runs-on: [self-hosted, linux, x64, project-3-scanner]
+    timeout-minutes: 45
+    steps:
+      - name: Check out trusted configuration
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Scan the approved Juice Shop target
+        id: scan
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          report="$RUNNER_TEMP/project-3-zap-report"
+          mkdir -p "$report"
+          target="http://10.20.1.71:3000"
+          curl --fail --silent --show-error --connect-timeout 5 --max-time 15 "$target/" -o /dev/null
+          cat > "$report/plan.yaml" <<EOF
+          env:
+            contexts:
+              - name: juice-shop
+                urls:
+                  - "$target"
+                includePaths:
+                  - 'http://10[.]20[.]1[.]71:3000/.*'
+            parameters:
+              failOnError: true
+              failOnWarning: false
+              progressToStdout: true
+          jobs:
+            - type: spider
+              parameters:
+                context: juice-shop
+                url: "$target"
+                maxDuration: 2
+            - type: passiveScan-wait
+              parameters:
+                maxDuration: 2
+            - type: activeScan
+              parameters:
+                context: juice-shop
+                url: "$target"
+                maxScanDurationInMins: 10
+            - type: passiveScan-wait
+              parameters:
+                maxDuration: 2
+            - type: report
+              parameters:
+                template: traditional-json
+                reportDir: "$report"
+                reportFile: zap-report.json
+            - type: report
+              parameters:
+                template: traditional-html
+                reportDir: "$report"
+                reportFile: zap-report.html
+          EOF
+          set +e
+          zap.sh -cmd -autorun "$report/plan.yaml"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "ZAP returned status $status; check the automation output."
+            exit "$status"
+          fi
+          test -s "$report/zap-report.json"
+          test -s "$report/zap-report.html"
+      - name: Publish scan summary
+        if: always()
+        env:
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
+          REPORT_DIR: ${{ runner.temp }}/project-3-zap-report
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/report-zap.py
+      - name: Upload ZAP reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: zap-dast-results
+          path: ${{ runner.temp }}/project-3-zap-report/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Clean scan workspace
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/project-3-zap-report"
