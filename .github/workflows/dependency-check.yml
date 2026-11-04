@@ -6,6 +6,7 @@ on:
       - ".github/workflows/dependency-check.yml"
       - "scripts/report-dependency-check.py"
       - "packer/juice-shop/**"
+  workflow_call:
   workflow_dispatch:
 permissions:
   contents: read
