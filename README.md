@@ -2117,6 +2117,38 @@ gh run watch 41695305784 --exit-status
 
 The summary contained 272 SonarQube issues: 104 blocker, 10 critical, 96 major and 62 minor. These are SonarQube issue severities, not proof of 272 exploitable vulnerabilities. The quality status was `OK`. CloudWatch receives one aggregate event and SNS one concise summary per scan attempt, while full findings stay in report artifacts.
 
+### Verify the CloudWatch scan summaries
+
+I used these read-only commands in WSL to check that the scanner summaries reached CloudWatch. The first query shows events from the last 24 hours; the second isolates the demonstrated combined run. [View my saved CloudWatch results](docs/evidence/cloudwatch-scan-summaries.md), including the earlier execution failures and later Gitleaks findings, rather than relying on a successful workflow badge alone.
+
+**Recent summary events:**
+
+```bash
+aws logs filter-log-events \
+  --profile mds-devsecops-lab \
+  --region us-east-1 \
+  --log-group-name /project-3/pipeline/scans \
+  --start-time "$(date -d '24 hours ago' +%s)000" \
+  --query 'events[].{Stream:logStreamName,Summary:message}' \
+  --output json \
+  --no-cli-pager
+```
+
+**Summary events for combined run `41846334576`:**
+
+```bash
+aws logs filter-log-events \
+  --profile mds-devsecops-lab \
+  --region us-east-1 \
+  --log-group-name /project-3/pipeline/scans \
+  --filter-pattern '"41846334576"' \
+  --query 'events[].{Stream:logStreamName,Summary:message}' \
+  --output json \
+  --no-cli-pager
+```
+
+The 24-hour window moves each time I run the first command, while the historical run query depends on the log retention period. An empty response is not evidence of zero vulnerabilities. I read the saved results in the linked file; detailed findings are in the linked report bundles.
+
 ## 26. Run Dependency-Check separately
 
 Dependency-Check added known-vulnerability analysis of the packaged dependencies. I checked its input and vulnerability-data access before trusting its findings.
@@ -2402,6 +2434,21 @@ find ~/project-3-artifact-review -type f | sort
 ```
 
 The successful run is [available in Actions](https://github.com/DelaneKay/project-3-secure-cicd-pipeline/actions/runs/41846334576). I kept reviewed scanner evidence for the portfolio and did not publish binary Terraform plans/state as portfolio examples. Reports demonstrate what a particular run actually found; source code alone cannot prove the tools executed or the notification arrived.
+
+### Open the saved pipeline results
+
+I kept the results separate from the walkthrough so readers can inspect the evidence directly.
+
+| Results | View or download |
+| --- | --- |
+| CloudWatch summaries, including failed executions and later scans | [View saved CloudWatch output](docs/evidence/cloudwatch-scan-summaries.md) |
+| Combined-run report index and coverage limitations | [View the evidence index](docs/evidence/combined-run-41846334576/README.md) |
+| Gitleaks | [Download ZIP](docs/evidence/combined-run-41846334576/gitleaks.zip) |
+| SonarQube | [Download ZIP](docs/evidence/combined-run-41846334576/sonarqube.zip) |
+| OWASP Dependency-Check | [Download ZIP](docs/evidence/combined-run-41846334576/dependency-check.zip) |
+| OWASP ZAP | [Download ZIP](docs/evidence/combined-run-41846334576/zap.zip) |
+
+The four ZIPs are archived scanner reports from combined run `41846334576`. They are point-in-time evidence, not the latest result for every scanner. I extract each ZIP to read its HTML, JSON or CSV files. Terraform binary plans and state are not included in these public evidence links.
 
 ## 32. Check the trust boundaries against the actual configuration
 
