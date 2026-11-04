@@ -1,0 +1,34 @@
+name: Combined secure CI-CD pipeline
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: project-3-combined-pipeline
+  cancel-in-progress: false
+jobs:
+  gitleaks:
+    name: Gitleaks secrets scan
+    uses: ./.github/workflows/gitleaks-aws.yml
+
+  sonarqube:
+    name: SonarQube SAST
+    uses: ./.github/workflows/sonarqube-analysis.yml
+    secrets: inherit
+
+  dependency_check:
+    name: Dependency-Check SCA
+    uses: ./.github/workflows/dependency-check.yml
+    secrets: inherit
+
+  deploy:
+    name: Terraform reviewed deployment
+    needs: [gitleaks, sonarqube, dependency_check]
+    uses: ./.github/workflows/terraform-deploy.yml
+    secrets: inherit
+
+  zap:
+    name: ZAP DAST
+    needs: deploy
+    uses: ./.github/workflows/zap-dast.yml
