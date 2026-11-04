@@ -90,6 +90,16 @@ resource "aws_iam_role_policy" "runner_runtime" {
       },
       {
         Effect   = "Allow"
+        Action   = ["ec2:DescribeInstances"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+          }
+        }
+      },
+      {
+        Effect   = "Allow"
         Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
         Resource = "arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key/*"
         Condition = {
