@@ -24,6 +24,20 @@ The scanning stages answered different questions:
 
 I kept the application intentionally vulnerable. My aim was to demonstrate repeatable deployment, security visibility and useful reporting, rather than remove Juice Shop's training vulnerabilities. A completed scan with findings was an expected result; a scanner that could not run or export its results was a separate operational problem that I needed to fix.
 
+## How my security studies shaped this lab
+
+I used this project to put ideas from three areas of study into practice. The Google Cybersecurity Certificate coursework gave me a grounding in security fundamentals, risk, investigation and the importance of recording evidence. My ISC2 Certified in Cybersecurity (CC) studies helped me think about least privilege, separation of duties and verifying access rather than trusting a request simply because it came from inside a network. I used those ideas to separate identities, restrict service paths and check who was making each AWS request.
+
+The AWS Certified Security – Specialty **SCS-C03 learning material** helped me apply those principles to AWS: protect the root identity, use temporary access and scoped roles, control management paths, and make activity observable. In this lab I chose SSM for management instead of exposing inbound SSH. That choice follows the aim of reducing management exposure; it is not a claim that the exam universally prohibits SSH. AWS describes SSM's IAM-controlled access and closed inbound management ports in its [Session Manager guidance](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html).
+
+| Learning background | How I applied it here |
+| --- | --- |
+| Google Cybersecurity Certificate coursework | Treat findings as evidence, investigate failures and document the risk and coverage limits rather than rely on a green badge. |
+| ISC2 CC studies | Apply least privilege and separation of duties; verify identity and authorization at trust boundaries. A private IP alone does not establish trust. |
+| AWS SCS-C03 learning material | Use a non-root administrative identity for lab operations, temporary CLI sessions and workload roles, restricted management access, and centralized logging. |
+
+I am describing how these studies influenced my decisions, not claiming this lab implements a complete zero-trust architecture or that studying the SCS-C03 material means I passed that certification. The [official SCS-C03 guide](https://docs.aws.amazon.com/aws-certification/latest/security-specialty-03/security-specialty-03.html) covers infrastructure security, identity and access management, detection and other security domains that helped frame this work.
+
 ## The security principles I built into the lab
 
 The main principle I wanted to demonstrate was **immutable infrastructure**. I prepared operating-system settings, application runtimes, scanner tools, service definitions and hardening in Packer before deployment. Terraform deployed those images. Once a host was deployed, I treated its installed software and configuration as fixed: when I needed a change, I corrected the image source, rebuilt the AMI and replaced the instance. I still read logs and checked health to understand failures.
@@ -83,7 +97,7 @@ I verified reachability and service health before interpreting scanner output. A
 
 | Stage | Sequence |
 | --- | --- |
-| [1. Workstation and access](#1-start-my-wsl-project-directory-and-verify-my-aws-identity) | Verify the IAM identity and region → install Packer and the Session Manager plugin → authenticate GitHub and clone the repository. |
+| [1. Workstation and access](#1-recover-my-iam-sign-in-then-start-a-short-lived-aws-login-session) | Verify the IAM identity and region → install Packer and the Session Manager plugin → authenticate GitHub and clone the repository. |
 | [2. Image builds](#4-create-the-temporary-builder-role-and-instance-profile) | Create the builder and operator roles → select Ubuntu 24.04 → prepare the build network → build the three AMIs. |
 | [3. Terraform layers](#12-split-terraform-into-independent-roots) | Create separate roots → validate and test networking and the database → move routine deployment into GitHub Actions. |
 | [4. Deployment controls](#16-bootstrap-the-private-remote-state-bucket) | Bootstrap S3 state → configure OIDC and scoped roles → protect apply jobs → review plans and deploy in dependency order. |
@@ -120,12 +134,9 @@ I documented the lab in the order I built and tested it, with the commands, expe
 8. Combined pipeline, trust boundaries, cleanup and challenges
 
 
-## 1. Start my WSL project directory and verify my AWS identity
+## 1. Recover my IAM sign-in, then start a short-lived AWS login session
 
-I verified identity first because every later AWS operation depends on the active principal. This establishes which human account is crossing the AWS trust boundary.
-
-I started in WSL and selected the IAM user profile for `us-east-1`. My expected identity ended in `:user/mds-devsecops-lab`. A Linux prompt saying `root` describes the local shell user; `aws sts get-caller-identity` tells me the AWS identity. I checked the latter instead of assuming the two were the same.
-
+I started in WSL as the Linux user `devsecops`. Before building anything, I recovered access to my IAM user and checked which AWS identity the CLI was using. A local Linux prompt saying `root` is different from the AWS root identity; the ARN returned by STS is what I checked.
 
 ```bash
 cd ~/projects
@@ -133,11 +144,77 @@ mkdir project-3-secure-cicd-pipeline
 cd project-3-secure-cicd-pipeline
 ```
 
+### Recover the IAM user's console password
+
+In my recorded recovery, I first used the existing `root-recovery` profile. Running this command opened a browser sign-in link. I followed that link and signed in as the AWS account root user for the recovery session.
 
 ```bash
-aws login --profile mds-devsecops-lab
+aws login --profile root-recovery
+
+aws sts get-caller-identity \
+  --profile root-recovery \
+  --query Arn \
+  --output text
 ```
 
+I checked that the returned ARN ended in `:root` before using the recovery profile. A profile name is only a local label; a profile called `root-recovery` can still point to a different identity. This was the recovery route I used when I could not access my IAM account, not a requirement to sign in as root whenever an IAM user's CLI session expires.
+
+I then used this Python-assisted command to set a new console password for `mds-devsecops-lab`. It prompts without echoing the password, checks the confirmation, writes the request into a restricted temporary file, and removes that file on exit. I did not paste a real password into the command or commit one to the repository.
+
+```bash
+(
+  set -e
+  umask 077
+
+  login_input="$(mktemp)"
+  trap 'rm -f "$login_input"' EXIT
+
+  python3 - "$login_input" <<'PY'
+import getpass
+import json
+import sys
+
+password = getpass.getpass("New password for mds-devsecops-lab: ")
+confirmation = getpass.getpass("Enter it again: ")
+
+if not password or password != confirmation:
+    raise SystemExit("Passwords are empty or do not match. Nothing changed.")
+
+with open(sys.argv[1], "w") as file:
+    json.dump({
+        "UserName": "mds-devsecops-lab",
+        "Password": password,
+        "PasswordResetRequired": False
+    }, file)
+PY
+
+  aws iam update-login-profile \
+    --cli-input-json "file://$login_input" \
+    --profile root-recovery \
+    --no-cli-auto-prompt
+
+  printf 'IAM user password updated successfully.\n'
+)
+```
+
+The important distinction is that this script resets the **IAM console password**. It does not generate short-lived API credentials, renew an expired CLI session or reset the root password. AWS documents that behaviour in [update-login-profile](https://docs.aws.amazon.com/cli/latest/reference/iam/update-login-profile.html). An administrator authorized to reset IAM login profiles can perform this operation too; it is not inherently a root-only task.
+
+### Leave the recovery identity and log in as my IAM user
+
+Once access was recovered, I ended the cached root-recovery CLI session, then signed in through the browser as `mds-devsecops-lab` using the new password. I selected the IAM user session rather than reusing a root browser session.
+
+```bash
+aws logout --profile root-recovery
+
+aws login --profile mds-devsecops-lab
+
+aws sts get-caller-identity \
+  --profile mds-devsecops-lab \
+  --query Arn \
+  --output text
+```
+
+I expected the ARN to end in `:user/mds-devsecops-lab`. The `aws login` browser flow obtains temporary CLI credentials; the CLI manages their refresh within the allowed login session. When that session expires, I run `aws login --profile mds-devsecops-lab` again. I do not reset the console password simply because the temporary credentials expired. This is the distinction described in [AWS's local-development login guidance](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sign-in.html).
 
 ```bash
 export AWS_PROFILE=mds-devsecops-lab
@@ -148,7 +225,14 @@ aws sts get-caller-identity
 packer version
 ```
 
-The existing directory was later replaced by a clone, so I did not run `mkdir` again on each visit. I kept root recovery outside the normal build and deployment process.
+The existing directory was later replaced by a clone, so I did not repeat `mkdir` on every visit. I continued the lab with the IAM user for authorized administrative setup and with the dedicated assumed roles for Packer and the pipeline.
+
+### Why I kept root out of routine lab work
+
+A principle reinforced by my AWS security studies was to keep the root identity protected and avoid it for ordinary administration. Root has account-wide powers, including operations reserved to root; accidental use or compromise therefore has a particularly large impact. I documented my root recovery as an exception and moved back to a non-root identity afterward. AWS recommends protecting root, using it only where required, enabling MFA and avoiding root access keys in its [root-user guidance](https://docs.aws.amazon.com/IAM/latest/UserGuide/root-user-best-practices.html).
+
+For this lab I used my IAM user for the administrative work I was authorized to perform instead of deploying as root. Administrative permissions are still powerful: `AdministratorAccess` is not least privilege, and replacing root with an unrestricted user does not remove that risk. I used separate scoped roles for automation. AWS's broader recommendation is federated human access with temporary credentials where possible, workload roles, MFA and least privilege—not permanently granting every operator administrator permissions. See [IAM security best practices](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html).
+
 
 ## 2. Install Packer and the Session Manager plugin
 
@@ -2117,38 +2201,6 @@ gh run watch 41695305784 --exit-status
 
 The summary contained 272 SonarQube issues: 104 blocker, 10 critical, 96 major and 62 minor. These are SonarQube issue severities, not proof of 272 exploitable vulnerabilities. The quality status was `OK`. CloudWatch receives one aggregate event and SNS one concise summary per scan attempt, while full findings stay in report artifacts.
 
-### Verify the CloudWatch scan summaries
-
-I used these read-only commands in WSL to check that the scanner summaries reached CloudWatch. The first query shows events from the last 24 hours; the second isolates the demonstrated combined run. [View my saved CloudWatch results](docs/evidence/cloudwatch-scan-summaries.md), including the earlier execution failures and later Gitleaks findings, rather than relying on a successful workflow badge alone.
-
-**Recent summary events:**
-
-```bash
-aws logs filter-log-events \
-  --profile mds-devsecops-lab \
-  --region us-east-1 \
-  --log-group-name /project-3/pipeline/scans \
-  --start-time "$(date -d '24 hours ago' +%s)000" \
-  --query 'events[].{Stream:logStreamName,Summary:message}' \
-  --output json \
-  --no-cli-pager
-```
-
-**Summary events for combined run `41846334576`:**
-
-```bash
-aws logs filter-log-events \
-  --profile mds-devsecops-lab \
-  --region us-east-1 \
-  --log-group-name /project-3/pipeline/scans \
-  --filter-pattern '"41846334576"' \
-  --query 'events[].{Stream:logStreamName,Summary:message}' \
-  --output json \
-  --no-cli-pager
-```
-
-The 24-hour window moves each time I run the first command, while the historical run query depends on the log retention period. An empty response is not evidence of zero vulnerabilities. I read the saved results in the linked file; detailed findings are in the linked report bundles.
-
 ## 26. Run Dependency-Check separately
 
 Dependency-Check added known-vulnerability analysis of the packaged dependencies. I checked its input and vulnerability-data access before trusting its findings.
@@ -2434,6 +2486,38 @@ find ~/project-3-artifact-review -type f | sort
 ```
 
 The successful run is [available in Actions](https://github.com/DelaneKay/project-3-secure-cicd-pipeline/actions/runs/41846334576). I kept reviewed scanner evidence for the portfolio and did not publish binary Terraform plans/state as portfolio examples. Reports demonstrate what a particular run actually found; source code alone cannot prove the tools executed or the notification arrived.
+
+### Verify the CloudWatch scan summaries
+
+I used these read-only commands in WSL to check that the scanner summaries reached CloudWatch. The first query shows events from the last 24 hours; the second isolates the demonstrated combined run. [View my saved CloudWatch results](docs/evidence/cloudwatch-scan-summaries.md), including the earlier execution failures and later Gitleaks findings, rather than relying on a successful workflow badge alone.
+
+**Recent summary events:**
+
+```bash
+aws logs filter-log-events \
+  --profile mds-devsecops-lab \
+  --region us-east-1 \
+  --log-group-name /project-3/pipeline/scans \
+  --start-time "$(date -d '24 hours ago' +%s)000" \
+  --query 'events[].{Stream:logStreamName,Summary:message}' \
+  --output json \
+  --no-cli-pager
+```
+
+**Summary events for combined run `41846334576`:**
+
+```bash
+aws logs filter-log-events \
+  --profile mds-devsecops-lab \
+  --region us-east-1 \
+  --log-group-name /project-3/pipeline/scans \
+  --filter-pattern '"41846334576"' \
+  --query 'events[].{Stream:logStreamName,Summary:message}' \
+  --output json \
+  --no-cli-pager
+```
+
+The 24-hour window moves each time I run the first command, while the historical run query depends on the log retention period. An empty response is not evidence of zero vulnerabilities. I read the saved results in the linked file; detailed findings are in the linked report bundles.
 
 ### Open the saved pipeline results
 
