@@ -2,15 +2,54 @@
 
 > Repository copy: AWS account/resource identifiers, internal host addresses, database endpoints and personal email addresses have been replaced with placeholders. I obtain their real values using the lookup commands shown before running the dependent command. These placeholders are not literal working AWS IDs.
 
-I built this walkthrough from the commands, file contents, results and corrections in our lab conversation. I followed the command-led structure of my Project 2B walkthrough: where I worked, what I ran, what I expected, what failed, and how I checked the correction. The command numbers link to the full chronological [command history](command-history.md); the complete file contents written through the GitHub integration are preserved in the [configuration record](configuration-record.md).
-
-**How to follow this:** the numbered steps are the successful path through the lab. The first Terraform deployment was manual; I later replaced routine local deployment with GitHub workflows. The historical command record deliberately retains earlier versions and failures. It is evidence, not a script to execute from top to bottom. I use the corrected files from the repository when reproducing the final build.
+I documented the lab in the order I built and tested it, with the commands, expected results and troubleshooting needed to follow the work. I kept the deployment steps and scanner tests together so each change has a clear purpose.
+**How to follow this:** the numbered steps are the successful path through the lab. The first Terraform deployment was manual; I later replaced routine local deployment with GitHub workflows. I use the corrected files from the repository when reproducing the final build.
 
 **Where commands run:** unless I say otherwise, I run Bash in WSL as the Linux user `devsecops`, from `~/projects/project-3-secure-cicd-pipeline`. Commands inside a Packer provisioner run on its temporary AWS builder. SSM diagnostics execute on the explicitly selected AWS instance. A GitHub `run:` block executes on the runner selected by that job. I do not paste Bash into PowerShell.
 
 **Historical values:** account `YOUR_ACCOUNT_ID`, region `us-east-1`, AMI IDs, instance IDs, VPC IDs, subnet IDs, command IDs and workflow run IDs below are the values recorded in this lab. A reader using another account must substitute their own values and update account-specific trust policies. A recreated subnet or instance receives a new ID; I check the lookup output before using an old command. I never copy a historical lock ID into an unrelated unlock operation.
 
 **Prerequisites already present at the start:** AWS CLI, Git and WSL access. I installed Packer and the Session Manager plugin during this conversation. Terraform was available by the time I initialized the first root. I have not invented a Terraform installation session or claimed it happened here.
+
+## The security principles I built into the lab
+
+The main principle I wanted to demonstrate was **immutable infrastructure**. I prepared operating-system settings, application runtimes, scanner tools, service definitions and hardening in Packer before deployment. Terraform deployed those images. Once a host was deployed, I treated its installed software and configuration as fixed: when I needed a change, I corrected the image source, rebuilt the AMI and replaced the instance. I still read logs and checked health to understand failures.
+
+Packer makes that approach practical by producing a reusable machine image from version-controlled build instructions. It does not technically prevent someone from changing a running server; avoiding those changes was a deliberate rule of this lab. My rule was **build the configuration before deployment; rebuild and replace afterward**. The baked startup code could retrieve environment-specific settings and short-lived credentials, but I did not use that as a way to install missing tools or repair configuration on a deployed host.
+
+| Principle | How I applied it |
+| --- | --- |
+| Immutable infrastructure | Bake software and configuration into AMIs; rebuild and replace affected hosts instead of patching them in place. |
+| Infrastructure as code | Define AWS resources in separate Terraform roots and review their saved plans before applying changes. |
+| Least privilege | Separate Packer, planning, apply and runtime roles; scope permissions to the operations and resources each needs. The walkthrough also records where the lab policies still need improvement. |
+| Separation of duties | Keep planning separate from approved applies, and use separate SonarQube analysis, reporting and administration credentials. My solo-lab self-approval is a demonstration of a gate, not independent peer review. |
+| Defense in depth | Combine host firewall settings, security groups, private service paths, IAM roles and several kinds of scanning. Each control covers a different part of the system. |
+| Short-lived access and secret protection | Use AWS login sessions, GitHub OIDC, instance roles and a short-lived runner registration token; keep application tokens in protected secrets rather than the repository or AMIs. |
+| Controlled management access | Use SSM for access and diagnostics, with no inbound SSH rule. Packer's temporary SSH communicator travels through an SSM tunnel during image creation. |
+| Early and complementary security checks | Run secrets, source and dependency checks before the reviewed application deployment, then test the running target with DAST. The scanner platform must exist first. |
+| Traceability and visibility | Preserve reports and workflow results, send aggregate events to CloudWatch and notify through SNS. Distinguish tool/reporting failure from a completed scan with no findings. |
+| Reproducible software inputs | Pin the application and tool versions and verify downloaded artifacts using the checksums or signatures implemented in the image build and scan workflows. |
+
+Because Juice Shop is intentionally vulnerable, I configured findings as report-only. This lets me demonstrate detection and reporting while continuing the lab deployment. I did not hide scanner execution failures behind that policy, and I would not present the same permissive findings policy as an automatic choice for a production application.
+
+## Why I used each tool
+
+| Tool or service | Why I used it and what it contributes |
+| --- | --- |
+| Packer | Build the three AMIs with their required software and configuration already present. It supports repeatable builds and replacement-based maintenance. |
+| Terraform | Describe and deploy AWS resources, expose dependencies through outputs, and keep separate state for each root. Plans make intended infrastructure changes reviewable. |
+| GitHub Actions | Run the checked-in deployment and scanner steps consistently. Reusable workflows let the combined pipeline call the same jobs I tested separately. |
+| Git and GitHub pull requests | Track changes to build scripts, infrastructure and workflows, and make a proposed change reviewable before merge. |
+| IAM and OIDC | Give workflows and instances identities with scoped permissions, using temporary AWS credentials instead of static AWS keys in GitHub. |
+| Systems Manager | Reach instances and inspect health without opening inbound SSH. It also carries the temporary Packer connection and the one-time registration parameter. |
+| S3 backend and native locking | Keep Terraform state outside a disposable runner and protect each state from simultaneous writes. Workflow concurrency complements the state locks. |
+| Gitleaks | Detect potential secrets in Git history, where deleting a credential from the latest file alone would not remove the exposure. |
+| SonarQube and SonarScanner | Analyze the matching source release and provide a central project view and API for exporting source-code findings. |
+| OWASP Dependency-Check | Identify known vulnerabilities associated with dependencies in the packaged release, with the coverage limitations recorded. |
+| OWASP ZAP | Exercise the running web application within the approved target scope and produce dynamic test evidence after deployment. |
+| CloudWatch Logs | Keep aggregate scan summaries and configured host/application logs available for investigation. |
+| SNS | Deliver a concise scan summary to a confirmed email subscriber without sending an email for every individual issue. |
+| RDS PostgreSQL and Secrets Manager | Keep SonarQube's persistent database separate from its replaceable EC2 host and let the startup process retrieve the database credentials through its runtime role. |
 
 ## Contents
 
@@ -26,10 +65,9 @@ I built this walkthrough from the commands, file contents, results and correctio
 
 ## 1. Start my WSL project directory and verify my AWS identity
 
+I verified identity first because every later AWS operation depends on the active principal. This establishes which human account is crossing the AWS trust boundary.
+
 I started in WSL and selected the IAM user profile for `us-east-1`. My expected identity ended in `:user/mds-devsecops-lab`. A Linux prompt saying `root` describes the local shell user; `aws sts get-caller-identity` tells me the AWS identity. I checked the latter instead of assuming the two were the same.
-
-
-[Chat command 55](command-history.md#command-55) · transcript line 2385.
 
 
 ```bash
@@ -39,15 +77,9 @@ cd project-3-secure-cicd-pipeline
 ```
 
 
-[Chat command 308](command-history.md#command-308) · transcript line 9156.
-
-
 ```bash
 aws login --profile mds-devsecops-lab
 ```
-
-
-[Chat command 69](command-history.md#command-69) · transcript line 2612.
 
 
 ```bash
@@ -63,10 +95,9 @@ The existing directory was later replaced by a clone, so I did not run `mkdir` a
 
 ## 2. Install Packer and the Session Manager plugin
 
+I needed Packer to prepare software, services and hardening before deployment. The Session Manager plugin supports its temporary SSM tunnel without an inbound SSH rule.
+
 I installed Packer from HashiCorp's package repository and the local Session Manager plugin. The version checks returned Packer 1.16.2 and plugin 1.2.896.0 in the recorded session. A completed installer returning to the prompt is different from a command that is still waiting.
-
-
-[Chat command 71](command-history.md#command-71) · transcript line 2648.
 
 
 ```bash
@@ -84,16 +115,10 @@ sudo apt-get install -y packer
 ```
 
 
-[Chat command 72](command-history.md#command-72) · transcript line 2664.
-
-
 ```bash
 packer version
 aws sts get-caller-identity
 ```
-
-
-[Chat command 73](command-history.md#command-73) · transcript line 2702.
 
 
 ```bash
@@ -106,18 +131,14 @@ session-manager-plugin --version
 
 ## 3. Authenticate GitHub and clone the repository
 
+Git and GitHub gave the build scripts and workflows a versioned source and review history. A later replacement could then be traced to a specific change.
+
 I used HTTPS with GitHub CLI for the repository. When browser authentication timed out, I checked connectivity before retrying authentication. I selected repository access for the private repository at that stage; visibility was changed later. I did not put a token in a Git command or commit it.
-
-
-[Chat command 98](command-history.md#command-98) · transcript line 3122.
 
 
 ```bash
 gh auth login
 ```
-
-
-[Chat command 101](command-history.md#command-101) · transcript line 3193.
 
 
 ```bash
@@ -126,15 +147,9 @@ curl -I --connect-timeout 10 https://github.com/
 ```
 
 
-[Chat command 105](command-history.md#command-105) · transcript line 3236.
-
-
 ```bash
 gh auth status
 ```
-
-
-[Chat command 109](command-history.md#command-109) · transcript line 3293.
 
 
 ```bash
@@ -146,9 +161,6 @@ git clone https://github.com/DelaneKay/project-3-secure-cicd-pipeline.git
 ```
 
 
-[Chat command 110](command-history.md#command-110) · transcript line 3303.
-
-
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 git status --short --branch
@@ -158,10 +170,9 @@ The original folder contained the downloaded Session Manager package and was not
 
 ## 4. Create the temporary builder role and instance profile
 
+I gave the temporary EC2 builder its own role so it could use SSM without inheriting the operator's AWS build permissions.
+
 I created the EC2 role used by temporary Packer builders to register with Systems Manager. This role is separate from my Packer operator role and from the runtime roles used by the application, SonarQube and scanner. I ran the creation once; if a later command failed, I inspected the resources rather than blindly recreating them.
-
-
-[Chat command 85](command-history.md#command-85) · transcript line 2860.
 
 
 ```bash
@@ -218,9 +229,6 @@ aws iam get-instance-profile \
 ```
 
 
-[Chat command 93](command-history.md#command-93) · transcript line 2998.
-
-
 ```bash
 aws iam list-attached-role-policies \
   --role-name project-3-packer-builder-role \
@@ -230,10 +238,9 @@ aws iam list-attached-role-policies \
 
 ## 5. Give Packer its own assumed role
 
+I used an assumed operator role so Packer could perform image-build and cleanup API calls using temporary credentials. The human login remained outside the image.
+
 The first build could not find usable credentials even though AWS CLI could identify my user. I created an operator role, granted my IAM user permission to assume it, and configured a login-backed credential process. Packer then used the `project-3-packer` role profile. The policy below is the actual lab bootstrap policy; its regional wildcard permissions are a lab limitation, not a claim of production-grade least privilege.
-
-
-[Chat command 183](command-history.md#command-183) · transcript line 4888.
 
 
 ```bash
@@ -308,9 +315,6 @@ aws iam get-role \
   --query 'Role.Arn' \
   --output text
 ```
-
-
-[Chat command 188](command-history.md#command-188) · transcript line 5270.
 
 
 ```bash
@@ -423,9 +427,6 @@ aws iam get-role-policy \
 ```
 
 
-[Chat command 190](command-history.md#command-190) · transcript line 5405.
-
-
 ```bash
 set -euo pipefail
 
@@ -460,10 +461,9 @@ I expected `assumed-role/project-3-packer-operator-role/project-3-packer-build` 
 
 ## 6. Select Ubuntu 24.04 and inspect the bootstrap network
 
+I selected the base image and checked its owner before building on it. A consistent verified base reduces variation between the three host images.
+
 I chose Ubuntu 24.04 LTS amd64 and retrieved Canonical's public AMI parameter. The recorded image was `ami-REPLACE_WITH_YOUR_ID`, owned by Canonical account `099720109477`. Before building, I inspected the default VPC, subnet public-IP behavior and route to the internet gateway.
-
-
-[Chat command 116](command-history.md#command-116) · transcript line 3514.
 
 
 ```bash
@@ -476,9 +476,6 @@ aws ssm get-parameter \
 ```
 
 
-[Chat command 118](command-history.md#command-118) · transcript line 3572.
-
-
 ```bash
 aws ec2 describe-images \
   --image-ids ami-REPLACE_WITH_YOUR_ID \
@@ -487,9 +484,6 @@ aws ec2 describe-images \
   --profile mds-devsecops-lab \
   --region us-east-1
 ```
-
-
-[Chat command 94](command-history.md#command-94) · transcript line 3027.
 
 
 ```bash
@@ -513,9 +507,6 @@ fi
 ```
 
 
-[Chat command 95](command-history.md#command-95) · transcript line 3058.
-
-
 ```bash
 aws ec2 describe-route-tables \
   --region us-east-1 \
@@ -527,10 +518,9 @@ aws ec2 describe-route-tables \
 
 ## 7. Create a no-ingress Packer security group
 
+The temporary builder needed outbound download and management access, not inbound administration. Its dedicated security group made that boundary explicit.
+
 I stopped using the default security group for builds and created a dedicated group with no inbound rules. Its outbound rules allowed TCP 80 for package mirrors and TCP 443 for SSM and downloads. Packer used its SSH communicator inside an SSM tunnel; this lab did not open public port 22. The temporary communicator is still SSH internally, so I do not describe it as an SSH-free Packer protocol.
-
-
-[Chat command 132](command-history.md#command-132) · transcript line 4308.
 
 
 ```bash
@@ -570,10 +560,9 @@ aws ec2 describe-security-groups \
 
 ## 8. Create the Juice Shop image files and build my first AMI
 
-I created the Juice Shop template and installation script, then formatted, initialized and validated the template before building. The original file-writing commands, including the full script and its UFW changes, are in the command history. For a fresh reproduction I use the corrected checked-out script: the early `snap enable` command was fixed to `snap start` before the successful build.
+Here I moved Juice Shop installation and host configuration into Packer. I prepared the runtime, service and firewall before launch; a later correction meant rebuilding and replacing the host.
 
-
-[Chat command 119](command-history.md#command-119) · transcript line 3592.
+I created the Juice Shop template and installation script, then formatted, initialized and validated the template before building. I used the corrected checked-in installation script, including its UFW settings. An early SSM Agent command used `snap enable`; I corrected it to `snap start` before the successful build.
 
 
 ```bash
@@ -582,15 +571,9 @@ mkdir -p packer/juice-shop/scripts
 ```
 
 
-[Chat command 125](command-history.md#command-125) · transcript line 3811.
-
-
 ```bash
 packer init packer/juice-shop
 ```
-
-
-[Chat command 135](command-history.md#command-135) · transcript line 4412.
 
 
 ```bash
@@ -611,18 +594,12 @@ packer validate \
 ```
 
 
-[Chat command 195](command-history.md#command-195) · transcript line 5514.
-
-
 ```bash
 sed -i 's/^[[:space:]]*snap enable amazon-ssm-agent$/  snap start amazon-ssm-agent/' \
   packer/juice-shop/scripts/install-juice-shop.sh
 
 sed -n '100,112p' packer/juice-shop/scripts/install-juice-shop.sh
 ```
-
-
-[Chat command 192](command-history.md#command-192) · transcript line 5452.
 
 
 ```bash
@@ -635,14 +612,13 @@ AWS_PROFILE=project-3-packer AWS_REGION=us-east-1 packer build \
   packer/juice-shop
 ```
 
-The first successful Juice Shop image was `ami-REPLACE_WITH_YOUR_ID`. I baked Node.js, Juice Shop 20.3.0, its systemd service, SSM support, CloudWatch configuration and host firewall into the image. [Original template](command-history.md#command-124), [full UFW script](command-history.md#command-129), and the later file corrections in the configuration history explain what the build installed. I did not run that provisioning script against the deployed application server.
+I baked Node.js, Juice Shop 20.3.0, its systemd service, SSM support, CloudWatch configuration and host firewall into the image. The [Packer template](../packer/juice-shop/juice-shop.pkr.hcl) and [installation script](../packer/juice-shop/scripts/install-juice-shop.sh) define what the build installs. I did not run that provisioning script against the deployed application server.
 
 ## 9. Create the SonarQube image and validate all required inputs
 
+SonarQube needed a separate image because it serves a different purpose and uses a different runtime from Juice Shop. I baked its software and startup mechanism before deployment.
+
 I created a separate SonarQube template, installer and CloudWatch installer. I loaded `version.env` because a valid template still needs values for source AMI, subnet, security group, SonarQube version and Java package. Running validation without those values produced the unset-variable errors we saw.
-
-
-[Chat command 213](command-history.md#command-213) · transcript line 5781.
 
 
 ```bash
@@ -655,15 +631,9 @@ EOF
 ```
 
 
-[Chat command 214](command-history.md#command-214) · transcript line 5798.
-
-
 ```bash
 nano packer/sonarqube/scripts/install-sonarqube.sh
 ```
-
-
-[Chat command 220](command-history.md#command-220) · transcript line 6053.
 
 
 ```bash
@@ -775,9 +745,6 @@ EOF
 ```
 
 
-[Chat command 223](command-history.md#command-223) · transcript line 6198.
-
-
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 packer fmt packer/sonarqube
@@ -795,9 +762,6 @@ packer validate \
   -var "java_package=${JAVA_PACKAGE}" \
   packer/sonarqube
 ```
-
-
-[Chat command 224](command-history.md#command-224) · transcript line 6233.
 
 
 ```bash
@@ -906,9 +870,6 @@ EOF
 ```
 
 
-[Chat command 226](command-history.md#command-226) · transcript line 6357.
-
-
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 
@@ -940,9 +901,6 @@ grep -n -A5 'install-cloudwatch-agent.sh' packer/sonarqube/sonarqube.pkr.hcl
 ```
 
 
-[Chat command 228](command-history.md#command-228) · transcript line 6418.
-
-
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 
@@ -963,19 +921,15 @@ Those are the initial build steps. The first service definition was later replac
 
 ## 10. Create the scanner runner image with pinned tools
 
-I built a third AMI for the AWS scanner runner. I pinned the runner, Gitleaks, SonarScanner, Dependency-Check, ZAP, Terraform, AWS CLI and Java versions. The complete initial installer appears in the history; subsequent fixes added Node.js/npm and tested tool execution as `actions-runner`. I did not install Gitleaks in WSL to satisfy a workflow intended to run in AWS.
+A separate runner image kept scanner software off the target application and SonarQube hosts. Baking the tools made a replacement repeatable instead of depending on live package installation.
 
-
-[Chat command 234](command-history.md#command-234) · transcript line 6517.
+I built a third AMI for the AWS scanner runner. I pinned the runner, Gitleaks, SonarScanner, Dependency-Check, ZAP, Terraform, AWS CLI and Java versions. Subsequent image-build fixes added Node.js/npm and tested tool execution as `actions-runner`. I did not install Gitleaks in WSL to satisfy a workflow intended to run in AWS.
 
 
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 mkdir -p packer/github-runner/scripts
 ```
-
-
-[Chat command 235](command-history.md#command-235) · transcript line 6566.
 
 
 ```bash
@@ -994,15 +948,9 @@ EOF
 ```
 
 
-[Chat command 237](command-history.md#command-237) · transcript line 6602.
-
-
 ```bash
 nano packer/github-runner/scripts/install-runner.sh
 ```
-
-
-[Chat command 250](command-history.md#command-250) · transcript line 7546.
 
 
 ```hcl
@@ -1144,15 +1092,9 @@ build {
 ```
 
 
-[Chat command 251](command-history.md#command-251) · transcript line 7690.
-
-
 ```bash
 packer init packer/github-runner
 ```
-
-
-[Chat command 252](command-history.md#command-252) · transcript line 7700.
 
 
 ```bash
@@ -1173,9 +1115,6 @@ packer validate \
 ```
 
 
-[Chat command 258](command-history.md#command-258) · transcript line 8142.
-
-
 ```bash
 set -a
 source packer/github-runner/versions.env
@@ -1193,22 +1132,16 @@ AWS_PROFILE=project-3-packer packer build \
   packer/github-runner
 ```
 
-The full initial installer is [command 255](command-history.md#command-255). The final recorded installer and Packer template are in [the configuration record](configuration-record.md). A runner AMI contains software, not a permanent GitHub registration token.
+The [runner installer](../packer/github-runner/scripts/install-runner.sh) and [Packer template](../packer/github-runner/github-runner.pkr.hcl) define the runner build. A runner AMI contains software, not a permanent GitHub registration token.
 
 ## 11. Commit the image build files
 
 I checked the Packer files before staging them. My first commit failed because Git had no author name; I set the repository's author from my authenticated GitHub account, committed again and pushed. A later 403 on push required fixing GitHub write permission, rather than changing AWS access.
 
 
-[Chat command 260](command-history.md#command-260) · transcript line 8200.
-
-
 ```bash
 git status --short
 ```
-
-
-[Chat command 261](command-history.md#command-261) · transcript line 8211.
 
 
 ```bash
@@ -1216,17 +1149,11 @@ find packer -maxdepth 4 -type f -print | sort
 ```
 
 
-[Chat command 262](command-history.md#command-262) · transcript line 8224.
-
-
 ```bash
 git add packer
 git diff --cached --stat
 git status --short
 ```
-
-
-[Chat command 265](command-history.md#command-265) · transcript line 8258.
 
 
 ```bash
@@ -1239,15 +1166,9 @@ git commit -m "Add hardened Packer AMI builds for Lab 3"
 ```
 
 
-[Chat command 263](command-history.md#command-263) · transcript line 8239.
-
-
 ```bash
 git commit -m "Add hardened Packer AMI builds for Lab 3"
 ```
-
-
-[Chat command 266](command-history.md#command-266) · transcript line 8278.
 
 
 ```bash
@@ -1255,15 +1176,9 @@ gh auth status --hostname github.com
 ```
 
 
-[Chat command 268](command-history.md#command-268) · transcript line 8298.
-
-
 ```bash
 git push origin master
 ```
-
-
-[Chat command 269](command-history.md#command-269) · transcript line 8306.
 
 
 ```bash
@@ -1272,10 +1187,9 @@ git status --short --branch
 
 ## 12. Split Terraform into independent roots
 
+I introduced Terraform to describe the AWS infrastructure surrounding the images. Separate roots made ownership, state and dependency order explicit.
+
 I created five separate root directories rather than one long Terraform file. Network owns the VPC, subnets, routes and security groups; database owns RDS; observability owns log groups and SNS; compute owns Juice Shop and the runner; sonarqube owns the SonarQube instance. At this point only network and database contained files—empty directories were not missing Git commits.
-
-
-[Chat command 272](command-history.md#command-272) · transcript line 8361.
 
 
 ```bash
@@ -1283,15 +1197,9 @@ mkdir -p terraform/network terraform/database terraform/compute terraform/sonarq
 ```
 
 
-[Chat command 281](command-history.md#command-281) · transcript line 8501.
-
-
 ```bash
 nano terraform/.gitignore
 ```
-
-
-[Chat command 282](command-history.md#command-282) · transcript line 8509.
 
 
 ```gitignore
@@ -1307,9 +1215,6 @@ crash.*.log
 ```
 
 
-[Chat command 384](command-history.md#command-384) · transcript line 12028.
-
-
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 
@@ -1321,23 +1226,19 @@ find terraform -maxdepth 3 -type f \
 ```
 
 
-[Chat command 393](command-history.md#command-393) · transcript line 12158.
-
-
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 find terraform/compute terraform/sonarqube terraform/observability \
   -maxdepth 2 -type f -print 2>/dev/null | sort
 ```
 
-The initial network file creation is preserved at [commands 273–322](command-history.md#command-273), and database creation at [commands 326–340](command-history.md#command-326). The later compute/observability/SonarQube files were created through the repository integration and are represented in the configuration record and repository. Separate roots mean separate state and explicit execution order, not that Terraform automatically runs every directory.
+I kept the definitions in the [network](../terraform/network), [database](../terraform/database), [compute](../terraform/compute), [observability](../terraform/observability) and [SonarQube](../terraform/sonarqube) roots. Separate roots mean separate state and explicit execution order, not that Terraform automatically runs every directory.
 
 ## 13. Validate and test the original network layer manually
 
+These manual Terraform runs were initial infrastructure tests before I automated execution. They were a development stage, not the final routine deployment process.
+
 During the initial build I ran Terraform locally to test the network root. I used two public and two private subnets in `10.20.0.0/16` and selected interface VPC endpoints. The plan initially showed 14 resources, then 21 after the remaining security groups were added. This manual stage is part of the history; it is not the final routine deployment method.
-
-
-[Chat command 283](command-history.md#command-283) · transcript line 8527.
 
 
 ```bash
@@ -1345,15 +1246,9 @@ terraform -chdir=terraform/network init
 ```
 
 
-[Chat command 284](command-history.md#command-284) · transcript line 8540.
-
-
 ```bash
 terraform -chdir=terraform/network validate
 ```
-
-
-[Chat command 294](command-history.md#command-294) · transcript line 8789.
 
 
 ```bash
@@ -1361,9 +1256,6 @@ cd ~/projects/project-3-secure-cicd-pipeline
 terraform -chdir=terraform/network fmt
 terraform -chdir=terraform/network validate
 ```
-
-
-[Chat command 304](command-history.md#command-304) · transcript line 9058.
 
 
 ```hcl
@@ -1390,25 +1282,16 @@ private_subnet_cidrs = [
 ```
 
 
-[Chat command 306](command-history.md#command-306) · transcript line 9105.
-
-
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 terraform -chdir=terraform/network apply
 ```
 
 
-[Chat command 312](command-history.md#command-312) · transcript line 9188.
-
-
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 terraform -chdir=terraform/network apply
 ```
-
-
-[Chat command 323](command-history.md#command-323) · transcript line 9593.
 
 
 ```bash
@@ -1418,9 +1301,6 @@ terraform -chdir=terraform/network validate
 ```
 
 
-[Chat command 325](command-history.md#command-325) · transcript line 9616.
-
-
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 terraform -chdir=terraform/network apply
@@ -1428,10 +1308,9 @@ terraform -chdir=terraform/network apply
 
 ## 14. Create and test the original SonarQube database layer
 
+RDS kept SonarQube's persistent database separate from its replaceable EC2 server. Terraform provisions that managed service; Packer builds the server image.
+
 I checked orderable PostgreSQL 17 versions, wrote the RDS and subnet-group files, and validated the database root before its original manual apply. RDS is a managed service, so it was created by Terraform, not baked by Packer. The recorded class was `db.t4g.micro`; the database was encrypted and private.
-
-
-[Chat command 334](command-history.md#command-334) · transcript line 9782.
 
 
 ```bash
@@ -1448,16 +1327,10 @@ aws rds describe-orderable-db-instance-options \
 ```
 
 
-[Chat command 335](command-history.md#command-335) · transcript line 9817.
-
-
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 nano terraform/database/terraform.tfvars
 ```
-
-
-[Chat command 336](command-history.md#command-336) · transcript line 9824.
 
 
 ```hcl
@@ -1466,16 +1339,10 @@ db_instance_class = "db.t4g.micro"
 ```
 
 
-[Chat command 337](command-history.md#command-337) · transcript line 9835.
-
-
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 nano terraform/database/database.tf
 ```
-
-
-[Chat command 338](command-history.md#command-338) · transcript line 9842.
 
 
 ```hcl
@@ -1522,16 +1389,10 @@ resource "aws_db_instance" "sonarqube" {
 ```
 
 
-[Chat command 339](command-history.md#command-339) · transcript line 9891.
-
-
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 nano terraform/database/outputs.tf
 ```
-
-
-[Chat command 340](command-history.md#command-340) · transcript line 9898.
 
 
 ```hcl
@@ -1562,18 +1423,12 @@ output "master_user_secret_arn" {
 ```
 
 
-[Chat command 341](command-history.md#command-341) · transcript line 9931.
-
-
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 terraform -chdir=terraform/database fmt
 terraform -chdir=terraform/database init
 terraform -chdir=terraform/database validate
 ```
-
-
-[Chat command 343](command-history.md#command-343) · transcript line 9955.
 
 
 ```bash
@@ -1585,10 +1440,9 @@ My original state reference was local. I later changed both roots to S3-backed s
 
 ## 15. Move routine Terraform execution into GitHub Actions
 
+GitHub Actions replaced repeated routine deployment commands with checked-in jobs. The reusable layer workflow runs the same plan-and-apply logic for each root.
+
 I kept the five roots but put the repeated init/plan/apply logic in `terraform-layer.yml`. The deployment workflow calls it in dependency order. GitHub-hosted runners were explicitly allowed for Terraform; security scanners stayed on the AWS runner. I committed the roots and workflows so a runner could actually check out the same code I had tested.
-
-
-[Chat command 487](command-history.md#command-487) · transcript line 14276.
 
 
 ```bash
@@ -1599,16 +1453,10 @@ git diff --cached --name-only
 ```
 
 
-[Chat command 505](command-history.md#command-505) · transcript line 14999.
-
-
 ```bash
 git add -A
 git status --short
 ```
-
-
-[Chat command 506](command-history.md#command-506) · transcript line 15062.
 
 
 ```bash
@@ -1616,21 +1464,17 @@ git diff --cached --check && git commit -m "Add Terraform CI and AWS Gitleaks wo
 ```
 
 
-[Chat command 507](command-history.md#command-507) · transcript line 15075.
-
-
 ```bash
 git push origin master
 ```
 
-The original Gitleaks move to AWS is preserved in [command 502](command-history.md#command-502). I retained format/validation and Checkov in Terraform validation. Pull requests validate without AWS deployment credentials; trusted post-merge/manual deployment uses OIDC. The complete combined-era deployment and scan workflows are in the configuration record.
+I moved Gitleaks to its [AWS scanner workflow](../.github/workflows/gitleaks-aws.yml) and retained formatting, validation and Checkov in Terraform validation. Pull requests validate without AWS deployment credentials; trusted post-merge or manual workflow deployment uses OIDC.
 
 ## 16. Bootstrap the private remote-state bucket
 
+A disposable workflow runner cannot be the permanent home of Terraform state. S3 keeps the state between runs, and native locking protects each state against concurrent writes.
+
 Before GitHub could initialize an S3 backend, I created the state bucket with the repository bootstrap script. This was a one-time AWS CLI bootstrap, not a Terraform root. The script enables versioning and encryption, blocks public access and rejects insecure transport. Each root uses `project-3/<root>/terraform.tfstate` with native `.tflock` locking.
-
-
-[Chat command 455](command-history.md#command-455) · transcript line 13062.
 
 
 ```bash
@@ -1640,16 +1484,10 @@ aws sts get-caller-identity --profile mds-devsecops-lab
 ```
 
 
-[Chat command 456](command-history.md#command-456) · transcript line 13070.
-
-
 ```bash
 AWS_PROFILE=mds-devsecops-lab AWS_REGION=us-east-1 \
   ./scripts/bootstrap-terraform-state.sh
 ```
-
-
-[Chat command 457](command-history.md#command-457) · transcript line 13077.
 
 
 ```bash
@@ -1662,10 +1500,9 @@ aws s3api head-bucket \
 
 ## 17. Create the OIDC provider and Terraform roles
 
+OIDC let a trusted GitHub job obtain temporary AWS credentials instead of storing an AWS access key. The plan and apply roles have separate trust and permission scopes.
+
 I created the GitHub OIDC provider and separate plan/apply roles, validated their permission documents with Access Analyzer, and attached the policies. Access Analyzer returned `[]` in that check; that meant it found no reported policy issues, not that every future AWS operation had been proven to work.
-
-
-[Chat command 458](command-history.md#command-458) · transcript line 13107.
 
 
 ```bash
@@ -1674,9 +1511,6 @@ aws iam list-open-id-connect-providers \
   --query 'OpenIDConnectProviderList[].Arn' \
   --output table
 ```
-
-
-[Chat command 459](command-history.md#command-459) · transcript line 13131.
 
 
 ```bash
@@ -1688,9 +1522,6 @@ aws iam create-open-id-connect-provider \
 ```
 
 
-[Chat command 460](command-history.md#command-460) · transcript line 13147.
-
-
 ```bash
 aws iam get-open-id-connect-provider \
   --open-id-connect-provider-arn arn:aws:iam::YOUR_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com \
@@ -1698,9 +1529,6 @@ aws iam get-open-id-connect-provider \
   --query '{Url:Url,ClientIDList:ClientIDList}' \
   --output json
 ```
-
-
-[Chat command 462](command-history.md#command-462) · transcript line 13190.
 
 
 ```bash
@@ -1723,9 +1551,6 @@ aws iam create-role \
 ```
 
 
-[Chat command 463](command-history.md#command-463) · transcript line 13311.
-
-
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 set -euo pipefail
@@ -1745,9 +1570,6 @@ do
     --no-cli-pager
 done
 ```
-
-
-[Chat command 464](command-history.md#command-464) · transcript line 13340.
 
 
 ```bash
@@ -1780,9 +1602,6 @@ aws iam list-role-policies \
 ```
 
 
-[Chat command 465](command-history.md#command-465) · transcript line 13378.
-
-
 ```bash
 gh variable set TF_STATE_BUCKET \
   --repo DelaneKay/project-3-secure-cicd-pipeline \
@@ -1799,10 +1618,9 @@ gh variable set AWS_TERRAFORM_APPLY_ROLE_ARN \
 
 ## 18. Configure deployment approval and runner registration
 
+The protected environment introduced a review point before infrastructure changes. A GitHub App supplied short-lived registration credentials for a new runner without putting a permanent token in an AMI.
+
 In GitHub Settings → Environments, I created `terraform-lab-apply`, restricted deployment to `master`, added `DelaneKay` as required reviewer, left Prevent self-review unchecked for this solo lab, disabled administrator bypass and saved. I reviewed each readable Terraform plan before approving its saved-plan apply. These were browser actions, so I do not invent a terminal command that claims to have performed them.
-
-
-[Chat command 465](command-history.md#command-465) · transcript line 13378.
 
 
 ```bash
@@ -1823,10 +1641,9 @@ I also created a GitHub App, selected only this repository, granted repository A
 
 ## 19. Run the standalone Terraform deployment and verify AWS resources
 
+I tested infrastructure deployment on its own before calling it from the combined pipeline. The scanner runner and SonarQube platform must exist before application scans can use them.
+
 I first ran `Terraform deployment` on `master`, approved the layer plans and checked the resulting EC2 and RDS resources. Networking applied first, then database and observability could progress independently; compute and SonarQube waited for their required upstream state. A first deployment needs this ordering because outputs do not exist before the upstream apply.
-
-
-[Chat command 921](command-history.md#command-921) · transcript line 21922.
 
 
 ```bash
@@ -1852,9 +1669,6 @@ aws rds describe-db-instances \
 ```
 
 
-[Chat command 922](command-history.md#command-922) · transcript line 21959.
-
-
 ```bash
 aws ssm describe-instance-information \
   --profile mds-devsecops-lab \
@@ -1867,10 +1681,9 @@ In GitHub I used Actions → Terraform deployment → Run workflow → master. T
 
 ## 20. Preserve immutability when a service fails
 
+I kept the immutable rule during troubleshooting: diagnose, change the Packer source, rebuild and replace. The permission commands below belong in the temporary image build, not on the deployed host as a repair.
+
 SonarQube repeatedly failed to listen on port 9000 even when systemd reported activating. I used SSM for read-only diagnostics, fixed the Packer source, rebuilt an AMI and let Terraform replace the instance. I did not turn a successful diagnosis into a permanent patch on the deployed server. These permission commands belong inside the image build, followed by the non-root execution test.
-
-
-[Chat command 1842](command-history.md#command-1842) · transcript line 35434.
 
 
 ```bash
@@ -1879,17 +1692,11 @@ chmod -R a+rX,u+w,go-w /usr/local/aws-cli
 ```
 
 
-[Chat command 1843](command-history.md#command-1843) · transcript line 35443.
-
-
 ```bash
 runuser -u sonarqube -- /bin/bash -c \
   'test -x /usr/local/aws-cli/v2/current/bin/aws &&
    /usr/local/aws-cli/v2/current/bin/aws --version'
 ```
-
-
-[Chat command 2015](command-history.md#command-2015) · transcript line 38156.
 
 
 ```bash
@@ -1903,9 +1710,6 @@ aws sts get-caller-identity \
   --query Arn \
   --output text
 ```
-
-
-[Chat command 1841](command-history.md#command-1841) · transcript line 35413.
 
 
 ```bash
@@ -1922,10 +1726,9 @@ The final successful SonarQube AMI recorded in this sequence was `ami-REPLACE_WI
 
 ## 21. Record rebuilt images and replace, rather than edit, the runner
 
+I used replacement for missing tools, executable permissions and runner sizing. The lasting correction belonged in the image or Terraform definition, not in manual changes to a working server.
+
 I encountered the same AWS CLI permission problem on the scanner runner, then discovered Node.js/npm were absent. I corrected the runner image, rebuilt it, recorded its AMI and backing snapshot, and replaced the EC2 runner through Terraform. The new runner used `ami-REPLACE_WITH_YOUR_ID`; the old offline GitHub runner entries were historical registrations, not usable capacity.
-
-
-[Chat command 2060](command-history.md#command-2060) · transcript line 38848.
 
 
 ```bash
@@ -1934,9 +1737,6 @@ cd ~/projects/project-3-secure-cicd-pipeline
 git switch master
 git pull --ff-only
 ```
-
-
-[Chat command 2061](command-history.md#command-2061) · transcript line 38857.
 
 
 ```bash
@@ -1960,9 +1760,6 @@ AWS_PROFILE=project-3-packer packer build \
 ```
 
 
-[Chat command 2062](command-history.md#command-2062) · transcript line 38888.
-
-
 ```bash
 aws ec2 describe-images \
   --profile mds-devsecops-lab \
@@ -1971,9 +1768,6 @@ aws ec2 describe-images \
   --query 'Images[].{AMI:ImageId,State:State,Snapshot:BlockDeviceMappings[0].Ebs.SnapshotId}' \
   --output table
 ```
-
-
-[Chat command 2063](command-history.md#command-2063) · transcript line 38906.
 
 
 ```bash
@@ -1994,9 +1788,6 @@ git push -u origin feat/runner-node-npm-ami
 ```
 
 
-[Chat command 2064](command-history.md#command-2064) · transcript line 38925.
-
-
 ```bash
 gh pr create \
   --base master \
@@ -2004,9 +1795,6 @@ gh pr create \
   --title "Record runner AMI with Node.js and npm" \
   --body "Record the rebuilt scanner runner AMI and its backing snapshot."
 ```
-
-
-[Chat command 2066](command-history.md#command-2066) · transcript line 38970.
 
 
 ```bash
@@ -2021,16 +1809,10 @@ aws ec2 describe-instances \
 ```
 
 
-[Chat command 1962](command-history.md#command-1962) · transcript line 37385.
-
-
 ```bash
 gh api repos/DelaneKay/project-3-secure-cicd-pipeline/actions/runners \
   --jq '.runners[] | {name, status, busy}'
 ```
-
-
-[Chat command 2067](command-history.md#command-2067) · transcript line 38992.
 
 
 ```bash
@@ -2043,9 +1825,6 @@ COMMAND_ID=$(aws ssm send-command \
   --query 'Command.CommandId' \
   --output text) && printf '%s\n' "$COMMAND_ID"
 ```
-
-
-[Chat command 2068](command-history.md#command-2068) · transcript line 39009.
 
 
 ```bash
@@ -2062,10 +1841,9 @@ The verification output was Node.js `v22.23.4`, npm `10.9.9` and Dependency-Chec
 
 ## 22. Run Gitleaks separately on the AWS runner
 
+Gitleaks checked repository history for possible secrets before I progressed to application analysis. This covers a different risk from vulnerable packages or web responses.
+
 I ran Gitleaks on the self-hosted scanner after it registered online. I scanned full Git history and uploaded a redacted JSON report. The first finding was the public AWS CLI signing-key fingerprint; I examined the exact historical commit before adding a single-finding ignore entry. I did not disable the generic API-key rule globally.
-
-
-[Chat command 1856](command-history.md#command-1856) · transcript line 35731.
 
 
 ```bash
@@ -2075,15 +1853,9 @@ gh run list --workflow gitleaks-aws.yml --limit 3
 ```
 
 
-[Chat command 1857](command-history.md#command-1857) · transcript line 35746.
-
-
 ```bash
 gh run watch 41624217203 --exit-status
 ```
-
-
-[Chat command 1858](command-history.md#command-1858) · transcript line 35752.
 
 
 ```bash
@@ -2091,17 +1863,11 @@ gh run view 41624217203
 ```
 
 
-[Chat command 1859](command-history.md#command-1859) · transcript line 35783.
-
-
 ```bash
 git show 9d2406ca349dfe9ad1aac51dedc80129a819c226:packer/sonarqube/scripts/install-sonarqube.sh \
   | sed -n '9p' \
   | cut -d= -f1
 ```
-
-
-[Chat command 1860](command-history.md#command-1860) · transcript line 35800.
 
 
 ```bash
@@ -2118,18 +1884,12 @@ git status --short
 ```
 
 
-[Chat command 1861](command-history.md#command-1861) · transcript line 35819.
-
-
 ```bash
 git add .gitleaksignore
 git diff --cached --check
 git commit -m "Exclude verified public AWS CLI signing fingerprint"
 git push -u origin fix/gitleaks-public-key-fingerprint
 ```
-
-
-[Chat command 1862](command-history.md#command-1862) · transcript line 35828.
 
 
 ```bash
@@ -2141,16 +1901,10 @@ gh pr create \
 ```
 
 
-[Chat command 1863](command-history.md#command-1863) · transcript line 35838.
-
-
 ```bash
 gh workflow run gitleaks-aws.yml --ref master
 gh run list --workflow gitleaks-aws.yml --limit 3
 ```
-
-
-[Chat command 1864](command-history.md#command-1864) · transcript line 35852.
 
 
 ```bash
@@ -2162,14 +1916,13 @@ gh run download 41626050135 \
 find reports/gitleaks-41626050135 -name 'gitleaks.json' -exec cat {} \;
 ```
 
-The verified rerun returned `[]`. Vulnerability findings remain report-only, while a missing executable or missing report is a scanner failure. The current complete workflow is preserved in the configuration record; the initial complete workflow is command 502 in the command history.
+The verified rerun returned `[]`. Vulnerability findings remain report-only, while a missing executable or missing report is a scanner failure. The [Gitleaks workflow](../.github/workflows/gitleaks-aws.yml) contains the checked-in scan and report steps.
 
 ## 23. Open SonarQube through SSM and bootstrap its project
 
+SonarQube provided a central source-analysis project, rule profiles and a results API. Its project setup is application-level configuration through a supported API, not a change to the host's baked software.
+
 I forwarded port 9000 to localhost with SSM, logged in to SonarQube and changed its initial password. I created the protected `sonarqube-admin` GitHub environment with `SONAR_HOST_URL` and `SONAR_ADMIN_TOKEN`, then ran the project setup workflow on the AWS runner. The setup script creates/reconciles the private `project-3-juice-shop` project and discovers the built-in language defaults.
-
-
-[Chat command 1890](command-history.md#command-1890) · transcript line 36167.
 
 
 ```bash
@@ -2180,9 +1933,6 @@ aws ssm start-session \
   --document-name AWS-StartPortForwardingSession \
   --parameters '{"portNumber":["9000"],"localPortNumber":["9000"]}'
 ```
-
-
-[Chat command 1891](command-history.md#command-1891) · transcript line 36239.
 
 
 ```bash
@@ -2196,10 +1946,9 @@ I used `http://localhost:9000/projects` in my browser. A version-specific profil
 
 ## 24. Separate SonarQube analysis and reporting permissions
 
+I separated analysis and reporting identities because submitting analysis and reading results are different jobs. Routine reporting did not need administrator permissions.
+
 I created `sonarqube-scan`, set `SONAR_HOST_URL` to the reachable private SonarQube URL, and stored the project analysis token as `SONAR_TOKEN`. I created `project-3-reporter`, granted Browse only at `http://localhost:9000/project_roles?id=project-3-juice-shop`, and stored that account's user token as `SONAR_REPORT_TOKEN`. A token inherits its owner's permissions; I did not use the administrator token for routine reporting.
-
-
-[Chat command 1963](command-history.md#command-1963) · transcript line 37402.
 
 
 ```bash
@@ -2209,23 +1958,14 @@ gh run list --workflow sonarqube-analysis.yml --limit 3
 ```
 
 
-[Chat command 1964](command-history.md#command-1964) · transcript line 37417.
-
-
 ```bash
 gh run watch 41648646890 --exit-status
 ```
 
 
-[Chat command 1965](command-history.md#command-1965) · transcript line 37423.
-
-
 ```bash
 gh run view 41648646890
 ```
-
-
-[Chat command 1966](command-history.md#command-1966) · transcript line 37429.
 
 
 ```bash
@@ -2236,10 +1976,9 @@ The workflow checked out Juice Shop v20.3.0, submitted analysis and kept quality
 
 ## 25. Export SonarQube results and verify CloudWatch/SNS
 
+CloudWatch and SNS made the results visible beyond a job log. I stored detailed reports as artifacts and published aggregate summaries to avoid one email per issue.
+
 I added the reporting step only after the standalone analysis worked. I downloaded the report to inspect its summary and verified a CloudWatch stream. SNS initially had no subscriptions, so successful publish calls could not produce an email. I supplied `TF_NOTIFICATION_EMAIL` through the repository variable, applied observability through the workflow, confirmed AWS's subscription email, and reran analysis.
-
-
-[Chat command 2022](command-history.md#command-2022) · transcript line 38299.
 
 
 ```bash
@@ -2249,23 +1988,14 @@ gh run list --workflow sonarqube-analysis.yml --limit 3
 ```
 
 
-[Chat command 2023](command-history.md#command-2023) · transcript line 38314.
-
-
 ```bash
 gh run watch 41671030481 --exit-status
 ```
 
 
-[Chat command 2024](command-history.md#command-2024) · transcript line 38320.
-
-
 ```bash
 gh run view 41671030481 --log-failed
 ```
-
-
-[Chat command 2025](command-history.md#command-2025) · transcript line 38335.
 
 
 ```bash
@@ -2277,9 +2007,6 @@ cat reports/sonarqube-41671030481/summary.json
 ```
 
 
-[Chat command 2026](command-history.md#command-2026) · transcript line 38354.
-
-
 ```bash
 aws sns list-subscriptions-by-topic \
   --profile mds-devsecops-lab \
@@ -2288,9 +2015,6 @@ aws sns list-subscriptions-by-topic \
   --query 'Subscriptions[].{Protocol:Protocol,Status:SubscriptionArn}' \
   --output table
 ```
-
-
-[Chat command 2027](command-history.md#command-2027) · transcript line 38363.
 
 
 ```bash
@@ -2304,9 +2028,6 @@ aws logs describe-log-streams \
 ```
 
 
-[Chat command 2030](command-history.md#command-2030) · transcript line 38407.
-
-
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 
@@ -2315,9 +2036,6 @@ grep -n -i 'notification_email' \
   .github/workflows/terraform-layer.yml \
   .github/workflows/terraform-deploy.yml
 ```
-
-
-[Chat command 2031](command-history.md#command-2031) · transcript line 38451.
 
 
 ```bash
@@ -2329,17 +2047,11 @@ aws sns list-subscriptions-by-topic \
 ```
 
 
-[Chat command 2032](command-history.md#command-2032) · transcript line 38472.
-
-
 ```bash
 gh workflow run sonarqube-analysis.yml --ref master
 
 gh run list --workflow sonarqube-analysis.yml --limit 3
 ```
-
-
-[Chat command 2033](command-history.md#command-2033) · transcript line 38487.
 
 
 ```bash
@@ -2350,10 +2062,9 @@ The summary contained 272 SonarQube issues: 104 blocker, 10 critical, 96 major a
 
 ## 26. Run Dependency-Check separately
 
+Dependency-Check added known-vulnerability analysis of the packaged dependencies. I checked its input and vulnerability-data access before trusting its findings.
+
 I verified Node.js, npm and Dependency-Check as the runner account before starting SCA. I created the `dependency-check` GitHub environment and stored `NVD_API_KEY` there. The initial source-tree workflow expected a top-level lockfile that was absent from the selected release; I changed it to verify and scan the packaged Juice Shop release with its installed dependencies.
-
-
-[Chat command 2067](command-history.md#command-2067) · transcript line 38992.
 
 
 ```bash
@@ -2368,9 +2079,6 @@ COMMAND_ID=$(aws ssm send-command \
 ```
 
 
-[Chat command 2068](command-history.md#command-2068) · transcript line 39009.
-
-
 ```bash
 aws ssm get-command-invocation \
   --profile mds-devsecops-lab \
@@ -2382,23 +2090,14 @@ aws ssm get-command-invocation \
 ```
 
 
-[Chat command 2134](command-history.md#command-2134) · transcript line 39918.
-
-
 ```bash
 gh run list --workflow dependency-check.yml --limit 3
 ```
 
 
-[Chat command 2135](command-history.md#command-2135) · transcript line 39933.
-
-
 ```bash
 gh run view 41719010612 --log-failed
 ```
-
-
-[Chat command 2136](command-history.md#command-2136) · transcript line 39964.
 
 
 ```bash
@@ -2423,10 +2122,9 @@ In GitHub I selected Actions → Juice Shop Dependency-Check → Run workflow �
 
 ## 27. Fix Dependency-Check execution before trusting its findings
 
+Report-only findings did not excuse a failed scanner. I corrected the workflow configuration and reran it rather than accepting an incomplete report as a clean result.
+
 The missing NVD key failed updates with exit 13. A later run wrote reports but still ended with unexpected exceptions and exit 14; that was not a clean scan. I inspected the report and added sanitized exception diagnostics. The confirmed parser correction changed the empty CPE skip-list property to an explicit empty JSON array.
-
-
-[Chat command 2174](command-history.md#command-2174) · transcript line 40502.
 
 
 ```text
@@ -2434,15 +2132,9 @@ ecosystem.skip.cpeanalyzer=
 ```
 
 
-[Chat command 2175](command-history.md#command-2175) · transcript line 40510.
-
-
 ```properties
 ecosystem.skip.cpeanalyzer=[]
 ```
-
-
-[Chat command 2136](command-history.md#command-2136) · transcript line 39964.
 
 
 ```bash
@@ -2463,14 +2155,13 @@ print("Dependencies reported:", len(report.get("dependencies", [])))
 PY
 ```
 
-The final recorded summary reported 16,284 dependencies, 20 vulnerable dependencies and 66 vulnerability occurrences: critical 23, high 13, medium 24 and low 6. Counts can change as vulnerability data changes. The full corrected command, NVD key handling and diagnostic handling are preserved in the Dependency-Check workflow in the configuration record.
+The final recorded summary reported 16,284 dependencies, 20 vulnerable dependencies and 66 vulnerability occurrences: critical 23, high 13, medium 24 and low 6. Counts can change as vulnerability data changes. The [Dependency-Check workflow](../.github/workflows/dependency-check.yml) contains the scan command, NVD key handling and execution diagnostics.
 
 ## 28. Verify ZAP and target reachability before DAST
 
+DAST needs a running reachable target. These read-only checks verified the tools already baked into the runner; missing software would have required an image rebuild.
+
 I checked the installed ZAP launcher and automation add-on as `actions-runner`. My first attempt used a nonexistent user called `runner`; that was an account-name mistake, not a reason to create a new user on the deployed host. I then checked the running Juice Shop instance and HTTP reachability from the scanner.
-
-
-[Chat command 2206](command-history.md#command-2206) · transcript line 40893.
 
 
 ```bash
@@ -2485,9 +2176,6 @@ aws ssm send-command \
 ```
 
 
-[Chat command 2207](command-history.md#command-2207) · transcript line 40910.
-
-
 ```bash
 aws ssm get-command-invocation \
   --profile mds-devsecops-lab \
@@ -2497,9 +2185,6 @@ aws ssm get-command-invocation \
   --query '{Status:Status,Output:StandardOutputContent,Errors:StandardErrorContent}' \
   --output json
 ```
-
-
-[Chat command 2213](command-history.md#command-2213) · transcript line 41001.
 
 
 ```bash
@@ -2514,9 +2199,6 @@ aws ssm send-command \
 ```
 
 
-[Chat command 2214](command-history.md#command-2214) · transcript line 41018.
-
-
 ```bash
 aws ssm get-command-invocation \
   --profile mds-devsecops-lab \
@@ -2526,9 +2208,6 @@ aws ssm get-command-invocation \
   --query '{Status:Status,Output:StandardOutputContent,Errors:StandardErrorContent}' \
   --output json
 ```
-
-
-[Chat command 2216](command-history.md#command-2216) · transcript line 41055.
 
 
 ```bash
@@ -2543,9 +2222,6 @@ aws ec2 describe-instances \
 ```
 
 
-[Chat command 2217](command-history.md#command-2217) · transcript line 41077.
-
-
 ```bash
 aws ssm send-command \
   --profile mds-devsecops-lab \
@@ -2556,9 +2232,6 @@ aws ssm send-command \
   --query 'Command.CommandId' \
   --output text
 ```
-
-
-[Chat command 2218](command-history.md#command-2218) · transcript line 41094.
 
 
 ```bash
@@ -2572,9 +2245,6 @@ aws ssm get-command-invocation \
 ```
 
 
-[Chat command 2231](command-history.md#command-2231) · transcript line 41234.
-
-
 ```bash
 aws ssm send-command \
   --profile mds-devsecops-lab \
@@ -2585,9 +2255,6 @@ aws ssm send-command \
   --query 'Command.CommandId' \
   --output text
 ```
-
-
-[Chat command 2232](command-history.md#command-2232) · transcript line 41251.
 
 
 ```bash
@@ -2604,7 +2271,9 @@ The checks returned ZAP 2.17.0, the automation-beta 0.58.0 add-on and Juice Shop
 
 ## 29. Run ZAP separately and keep its scope bounded
 
-I used Actions → Juice Shop ZAP DAST → Run workflow → master after merging its workflow. ZAP discovers exactly one running Project-tagged Juice Shop instance, checks the address is inside `10.20.0.0/16`, tests HTTP reachability, then runs a bounded unauthenticated spider and active scan. I limited the target to my lab application. The full command and automation plan are reproduced in the configuration record.
+ZAP tested the running application's HTTP behaviour after deployment. Target validation and bounded scan settings kept the active test within the approved lab.
+
+I used Actions → Juice Shop ZAP DAST → Run workflow → master after merging its workflow. ZAP discovers exactly one running Project-tagged Juice Shop instance, checks the address is inside `10.20.0.0/16`, tests HTTP reachability, then runs a bounded unauthenticated spider and active scan. I limited the target to my lab application. The [ZAP workflow](../.github/workflows/zap-dast.yml) contains the scan command and automation plan.
 
 The successful run was `41832567685`, with five alert types: two medium and three informational. It produced JSON/HTML reports and an SNS email. This is limited unauthenticated coverage: it does not claim to exercise all Juice Shop routes, JavaScript flows or authenticated features.
 
@@ -2615,6 +2284,8 @@ gh run view 41832567685
 This uses the same `gh run view` command used throughout the lab, with the successful ZAP run ID shown in the recorded notification.
 
 ## 30. Combine the tested workflows without deleting the separate ones
+
+Reusable workflows connected the tested controls without a second copy of their logic. The separate entry points remained useful for demonstrations and isolated troubleshooting.
 
 After verifying Gitleaks, SAST, SCA and DAST independently, I added `workflow_call` to the reusable scanner/deployment workflows and created `secure-pipeline.yml`. The separate workflows remain available for demonstrations and isolated troubleshooting. The combined workflow starts Gitleaks, SonarQube and Dependency-Check before deployment, reuses reviewed Terraform deployment, and runs ZAP after deployment.
 
@@ -2663,9 +2334,6 @@ I used Actions → Combined secure CI-CD pipeline → Run workflow → master. T
 My first combined run, `41846334576`, completed successfully in 33 minutes 47 seconds with nine artifacts. Four were scanner result bundles and five were saved Terraform plan bundles. I retained the separate workflow files as well as the combined one. A green pipeline means the configured jobs completed; it does not mean the intentionally vulnerable application is safe.
 
 
-[Chat command 2402](command-history.md#command-2402) · transcript line 43545.
-
-
 ```bash
 mkdir -p ~/project-3-artifact-review
 
@@ -2683,9 +2351,6 @@ The successful run is [available in Actions](https://github.com/DelaneKay/projec
 I checked the boundaries using the same identity, network, runner-registration and subscription queries I used during the build. Each boundary below identifies who may cross it and which control makes that possible.
 
 
-[Chat command 69](command-history.md#command-69) · transcript line 2612.
-
-
 ```bash
 export AWS_PROFILE=mds-devsecops-lab
 export AWS_REGION=us-east-1
@@ -2696,9 +2361,6 @@ packer version
 ```
 
 
-[Chat command 1428](command-history.md#command-1428) · transcript line 30063.
-
-
 ```bash
 aws ec2 describe-vpcs \
   --profile mds-devsecops-lab \
@@ -2707,9 +2369,6 @@ aws ec2 describe-vpcs \
   --query 'Vpcs[].{VpcId:VpcId,Cidr:CidrBlock}' \
   --output table
 ```
-
-
-[Chat command 1429](command-history.md#command-1429) · transcript line 30081.
 
 
 ```bash
@@ -2729,16 +2388,10 @@ aws ec2 describe-security-groups \
 ```
 
 
-[Chat command 1962](command-history.md#command-1962) · transcript line 37385.
-
-
 ```bash
 gh api repos/DelaneKay/project-3-secure-cicd-pipeline/actions/runners \
   --jq '.runners[] | {name, status, busy}'
 ```
-
-
-[Chat command 2031](command-history.md#command-2031) · transcript line 38451.
 
 
 ```bash
@@ -2772,9 +2425,6 @@ The private SonarQube/scanner HTTP API path still uses HTTP inside the VPC; priv
 When I paused the lab I used Terraform destroy through GitHub, not manual deletion of state files. In Actions → Terraform destroy → Run workflow, I selected master, supplied the workflow's required `DESTROY` confirmation, reviewed the destroy plans and approved them. Destruction runs in reverse dependency order. My RDS configuration skips the final snapshot as agreed.
 
 
-[Chat command 1293](command-history.md#command-1293) · transcript line 27695.
-
-
 ```bash
 aws sts get-caller-identity --profile mds-devsecops-lab
 
@@ -2801,10 +2451,9 @@ I expected no active Project 3 instances, database or VPC after a complete teard
 
 ## 34. Challenge: stale VPC/subnet permissions after recreation
 
+This manual IAM-policy repair exposed a remaining bootstrap automation gap. It did not change a deployed host, and I returned to workflow deployment after correcting the policy.
+
 The EC2 403s persisted because the role policy referred to a previous network. I compared the live VPC/subnets with `LaunchInterfacesInLabVpc`, `LaunchInTaggedSubnets` and `UseTaggedLabSecurityGroups`. I updated those exact conditions, reviewed the JSON and reapplied the bootstrap IAM policy. This was a bootstrap policy repair, not a patch to the deployed machines.
-
-
-[Chat command 1428](command-history.md#command-1428) · transcript line 30063.
 
 
 ```bash
@@ -2815,9 +2464,6 @@ aws ec2 describe-vpcs \
   --query 'Vpcs[].{VpcId:VpcId,Cidr:CidrBlock}' \
   --output table
 ```
-
-
-[Chat command 1429](command-history.md#command-1429) · transcript line 30081.
 
 
 ```bash
@@ -2835,9 +2481,6 @@ aws ec2 describe-security-groups \
   --query 'SecurityGroups[].{GroupId:GroupId,Name:GroupName}' \
   --output table
 ```
-
-
-[Chat command 1217](command-history.md#command-1217) · transcript line 26409.
 
 
 ```bash
@@ -2919,9 +2562,6 @@ git diff -- "$policy"
 ```
 
 
-[Chat command 1574](command-history.md#command-1574) · transcript line 31845.
-
-
 ```bash
 cd ~/projects/project-3-secure-cicd-pipeline
 git pull --ff-only
@@ -2937,10 +2577,22 @@ The recorded script ends with `jq empty`; on my WSL session `jq` was missing. Th
 
 ## 35. Challenge: OIDC, API-specific IAM scopes and policy size
 
+I corrected the workflow's authorization configuration rather than bypassing it with broad administrator access or changing application hosts. The corrected policy was followed by a fresh reviewed plan.
+
 The first OIDC assumption failed because the trust subject did not match this repository's immutable owner/repository identifiers. I corrected the two trust files and updated the live roles. I subsequently repaired CloudWatch list scope, RDS subnet-group ARN, EC2 image ARN ownership and launch-time tagging permissions instead of attaching AdministratorAccess.
 
 
-[Chat command 557](command-history.md#command-557) · transcript line 15731.
+```bash
+aws iam update-assume-role-policy \
+  --role-name project-3-terraform-plan-role \
+  --policy-document file://iam/terraform-github-oidc/plan-trust.json \
+  --profile mds-devsecops-lab
+
+aws iam update-assume-role-policy \
+  --role-name project-3-terraform-apply-role \
+  --policy-document file://iam/terraform-github-oidc/apply-trust.json \
+  --profile mds-devsecops-lab
+```
 
 
 ```bash
@@ -2956,25 +2608,6 @@ aws iam update-assume-role-policy \
 ```
 
 
-[Chat command 559](command-history.md#command-559) · transcript line 15771.
-
-
-```bash
-aws iam update-assume-role-policy \
-  --role-name project-3-terraform-plan-role \
-  --policy-document file://iam/terraform-github-oidc/plan-trust.json \
-  --profile mds-devsecops-lab
-
-aws iam update-assume-role-policy \
-  --role-name project-3-terraform-apply-role \
-  --policy-document file://iam/terraform-github-oidc/apply-trust.json \
-  --profile mds-devsecops-lab
-```
-
-
-[Chat command 560](command-history.md#command-560) · transcript line 15789.
-
-
 ```bash
 aws iam get-role \
   --role-name project-3-terraform-plan-role \
@@ -2988,9 +2621,6 @@ aws iam get-role \
   --output json \
   --profile mds-devsecops-lab
 ```
-
-
-[Chat command 588](command-history.md#command-588) · transcript line 16194.
 
 
 ```bash
@@ -3006,10 +2636,9 @@ For this repository the subjects include `DelaneKay@YOUR_GITHUB_OWNER_ID` and `p
 
 ## 36. Challenge: state lock, existing database and stale saved plans
 
+Unlocking abandoned state and importing an existing database were exceptional state-recovery operations. After verifying ownership and reconciling state, I returned to automated plan and apply; I did not disable locking.
+
 An S3 412 indicated an existing lock, not a permission denial. I checked for another live apply before unlocking the specific abandoned database operation. The following is the historical recovery command with its original lock ID; I never run it without establishing that the owning operation has ended.
-
-
-[Chat command 1426](command-history.md#command-1426) · transcript line 29924.
 
 
 ```bash
@@ -3030,10 +2659,9 @@ A separate failure said the database subnet group already existed. I checked the
 
 ## 37. Challenge: diagnose startup and permission failures without mutable repair
 
+I stopped at diagnosis on the deployed host. Even where a live permission change might have been quicker, the lasting fix went into Packer and I replaced the instance so the next deployment did not depend on an undocumented repair.
+
 I distinguished a running EC2 instance from a healthy service. The useful diagnostics were service status/journal, HTTP checks and file-path execution permissions under the service account. The checks below exposed the CLI executable-path/traversal problem, which I corrected in the image source. I also learned that SSM shell commands are not guaranteed to use Bash: `set -o pipefail` failed under `/bin/sh`.
-
-
-[Chat command 1584](command-history.md#command-1584) · transcript line 32182.
 
 
 ```bash
@@ -3054,9 +2682,6 @@ aws ssm get-command-invocation \
   --query '{Status:Status,Output:StandardOutputContent,Errors:StandardErrorContent}' \
   --output json
 ```
-
-
-[Chat command 1765](command-history.md#command-1765) · transcript line 34424.
 
 
 ```bash
@@ -3083,9 +2708,6 @@ echo "$COMMAND_ID"
 ```
 
 
-[Chat command 1766](command-history.md#command-1766) · transcript line 34449.
-
-
 ```bash
 aws ssm get-command-invocation \
   --profile mds-devsecops-lab \
@@ -3100,10 +2722,9 @@ A shell diagnostic ending in success can hide an earlier failed `curl` if a late
 
 ## 38. Challenge: delivery failure is not a clean scan
 
+I applied the same rule to reporting failures: correct software permissions in Packer or reporting/IAM logic in version control, then rebuild or rerun. I did not keep an ad hoc change on the deployed runner as the solution.
+
 SonarQube analysis succeeded but export failed when `actions-runner` could not execute AWS CLI. After the image permission fix, CloudWatch delivered its event. SNS still needed a confirmed subscription before email could arrive. I verified these stages separately instead of treating a missing email as proof of zero issues.
-
-
-[Chat command 1997](command-history.md#command-1997) · transcript line 37914.
 
 
 ```bash
@@ -3113,9 +2734,6 @@ gh run download 41656129319 \
 
 cat reports/sonarqube-41656129319/summary.json
 ```
-
-
-[Chat command 1998](command-history.md#command-1998) · transcript line 37933.
 
 
 ```bash
@@ -3130,9 +2748,6 @@ COMMAND_ID=$(aws ssm send-command \
 ```
 
 
-[Chat command 1999](command-history.md#command-1999) · transcript line 37950.
-
-
 ```bash
 aws ssm get-command-invocation \
   --profile mds-devsecops-lab \
@@ -3144,9 +2759,6 @@ aws ssm get-command-invocation \
 ```
 
 
-[Chat command 2026](command-history.md#command-2026) · transcript line 38354.
-
-
 ```bash
 aws sns list-subscriptions-by-topic \
   --profile mds-devsecops-lab \
@@ -3155,9 +2767,6 @@ aws sns list-subscriptions-by-topic \
   --query 'Subscriptions[].{Protocol:Protocol,Status:SubscriptionArn}' \
   --output table
 ```
-
-
-[Chat command 2027](command-history.md#command-2027) · transcript line 38363.
 
 
 ```bash
@@ -3171,9 +2780,6 @@ aws logs describe-log-streams \
 ```
 
 
-[Chat command 2031](command-history.md#command-2031) · transcript line 38451.
-
-
 ```bash
 aws sns list-subscriptions-by-topic \
   --profile mds-devsecops-lab \
@@ -3184,8 +2790,3 @@ aws sns list-subscriptions-by-topic \
 
 I use three distinct outcomes: a completed scan with no findings, a completed scan with findings, and execution/reporting failure. Findings do not block deployment in this lab. A tool that cannot run, parse its report or deliver required reporting is an operational failure and remains visible. I tested the separate workflows first so I could identify these failures before combining them.
 
-## Source coverage and supporting records
-
-I used the two supplied text attachments and the earlier conversation. The larger attachment contains both visible command blocks and repository-tool file writes. I extracted the visible blocks into [command-history.md](command-history.md), with original source-line references and exact duplicates collapsed, and decoded the repository file writes into [configuration-record.md](configuration-record.md). The small identity/profile attachment supports step 1. The shared-chat URL is a source pointer; the attachments provide the locally readable record.
-
-I retained historical IDs and failed attempts as evidence, omitted credential values, and labelled browser-only actions instead of fabricating commands for them. Where a complete command uses the same established command with a later run ID, I say so. Configuration definitions shown as HCL/YAML are file contents, not shell commands to paste directly into a terminal. I used the checked-in final files for the final build and preserved their development history separately.
