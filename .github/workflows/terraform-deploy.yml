@@ -9,6 +9,7 @@ on:
       - ".github/workflows/terraform-*.yml"
       - "docs/terraform-layering-rationale.md"
       - "LAB-3-SOURCE-OF-TRUTH.md"
+  workflow_call:
   workflow_dispatch:
 
 permissions:
