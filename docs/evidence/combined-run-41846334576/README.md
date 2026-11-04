@@ -16,3 +16,7 @@ Private IPv4 addresses in the archived copies have been replaced with `[redacted
 Dependency-Check's packaged Node.js scan had no top-level lockfile and npm audit was unavailable; false negatives are possible. The ZAP scan used an unauthenticated traditional spider and a bounded active scan; its coverage of the JavaScript application is limited. Finding counts do not necessarily represent unique vulnerabilities.
 
 The Terraform plan artifacts from this run are not included here. Saved plans may contain sensitive values and require a separate review before public distribution.
+
+## CloudWatch delivery evidence
+
+[View the saved CloudWatch summary results](../cloudwatch-scan-summaries.md). The record includes all four summaries for this combined run and also identifies earlier execution failures and later Gitleaks findings from separate runs.
