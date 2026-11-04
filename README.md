@@ -511,6 +511,325 @@ The line was the AWS CLI signing-key fingerprint, which is a public verification
 
 I learned to verify the identity making a request, read the exact AWS authorization decision, check Terraform state before retrying, and separate instance status from application readiness. Most importantly, I corrected image and workflow definitions and retested them instead of silently changing the running application host.
 
+
+## Command-by-command execution record
+
+I started with separate workflows, verified each one, and only then connected them. This section records that order. Resource IDs changed during rebuilds, so I use current lookup commands and clearly marked placeholders rather than reusing terminated instance IDs. Some setup was performed in GitHub and SonarQube screens; those steps do not have a shell command in this chat.
+
+### A. Open the project and authenticate
+
+I ran these commands as my normal WSL user:
+
+```bash
+cd ~/projects
+gh auth login --hostname github.com --git-protocol https
+gh auth setup-git
+
+# Clone once, into a directory that does not already contain the project.
+gh repo clone DelaneKay/project-3-secure-cicd-pipeline
+cd ~/projects/project-3-secure-cicd-pipeline
+git status --short --branch
+git remote -v
+
+aws sts get-caller-identity --profile mds-devsecops-lab --query Arn --output text
+aws sts get-caller-identity --profile project-3-packer --query Arn --output text
+packer version
+terraform version
+session-manager-plugin --version
+```
+
+If the directory already existed, I inspected it before cloning. I did not delete an existing project to work around a clone error. Authentication renewal used my configured AWS CLI login profile; credentials and root-recovery operations are not part of the deployment runbook.
+
+### B. Create and inspect the working folders
+
+```bash
+mkdir -p packer/juice-shop/scripts
+mkdir -p packer/sonarqube/scripts
+mkdir -p packer/github-runner/scripts
+mkdir -p terraform/network terraform/database terraform/compute
+mkdir -p terraform/sonarqube terraform/observability
+
+find packer -maxdepth 3 -type f | sort
+find terraform -maxdepth 2 -type f \
+  ! -name 'terraform.tfstate*' ! -name '*.tfplan' | sort
+
+nano packer/juice-shop/scripts/install-juice-shop.sh
+nano packer/sonarqube/scripts/install-sonarqube.sh
+nano packer/github-runner/scripts/install-runner.sh
+```
+
+I used the version-controlled files in those locations for the script contents. In nano I saved with Ctrl+O, Enter, and exited with Ctrl+X. When Git opened a pager showing END, I pressed q.
+
+### C. Bootstrap IAM and build networking
+
+I followed the full role-creation command block in [Packer IAM bootstrap](docs/packer-builder-iam-bootstrap.md). I then checked the builder profile:
+
+```bash
+aws iam get-instance-profile \
+  --profile mds-devsecops-lab \
+  --instance-profile-name project-3-packer-builder-profile \
+  --query 'InstanceProfile.Roles[].RoleName' --output text
+
+aws iam list-attached-role-policies \
+  --profile mds-devsecops-lab \
+  --role-name project-3-packer-builder-role --output table
+
+aws ec2 describe-subnets \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --query 'Subnets[].{Subnet:SubnetId,Vpc:VpcId,PublicIP:MapPublicIpOnLaunch}' \
+  --output table
+
+aws ec2 describe-security-groups \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --group-ids sg-REPLACE \
+  --query 'SecurityGroups[].{Ingress:IpPermissions,Egress:IpPermissionsEgress}' \
+  --output json
+```
+
+The temporary builder security group had no inbound rules and outbound TCP 80/443. Initially I used bootstrap networking; later Terraform managed a dedicated builder group. I selected a subnet with a working outbound path, not a private subnet without the required connectivity.
+
+### D. Build all three images
+
+I supplied current values rather than relying on old defaults in templates:
+
+```bash
+export AWS_PROFILE=project-3-packer
+export PKR_VAR_aws_region=us-east-1
+export PKR_VAR_source_ami_id=ami-REPLACE_WITH_VERIFIED_UBUNTU_2404_IMAGE
+export PKR_VAR_subnet_id=subnet-REPLACE
+export PKR_VAR_security_group_id=sg-REPLACE
+
+bash -n packer/juice-shop/scripts/install-juice-shop.sh
+packer init packer/juice-shop
+packer validate packer/juice-shop
+packer build packer/juice-shop
+
+# Load the version pins I reviewed in the repository.
+set -a
+source packer/sonarqube/version.env
+set +a
+export PKR_VAR_sonarqube_version="$SONARQUBE_VERSION"
+export PKR_VAR_java_package="$JAVA_PACKAGE"
+bash -n packer/sonarqube/scripts/install-sonarqube.sh
+bash -n packer/sonarqube/scripts/start-sonarqube.sh
+packer init packer/sonarqube
+packer validate packer/sonarqube
+packer build packer/sonarqube
+
+set -a
+source packer/github-runner/versions.env
+set +a
+export PKR_VAR_github_runner_version="$GITHUB_RUNNER_VERSION"
+export PKR_VAR_gitleaks_version="$GITLEAKS_VERSION"
+export PKR_VAR_sonar_scanner_version="$SONAR_SCANNER_VERSION"
+export PKR_VAR_dependency_check_version="$DEPENDENCY_CHECK_VERSION"
+export PKR_VAR_zap_version="$ZAP_VERSION"
+export PKR_VAR_terraform_version="$TERRAFORM_VERSION"
+export PKR_VAR_aws_cli_version="$AWS_CLI_VERSION"
+export PKR_VAR_java_package="$JAVA_PACKAGE"
+bash -n packer/github-runner/scripts/install-runner.sh
+packer init packer/github-runner
+packer validate packer/github-runner
+packer build packer/github-runner
+```
+
+After each successful build I checked the returned AMI and its backing snapshot:
+
+```bash
+aws ec2 describe-images \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --image-ids ami-REPLACE_WITH_BUILD_OUTPUT \
+  --query 'Images[].{AMI:ImageId,State:State,Snapshots:BlockDeviceMappings[].Ebs.SnapshotId}' \
+  --output table
+
+# Example for SonarQube; use its actual returned AMI and snapshot IDs.
+cat > packer/sonarqube/ami-id.txt <<'EOF'
+AMI_ID=ami-REPLACE
+SNAPSHOT_ID=snap-REPLACE
+AWS_REGION=us-east-1
+EOF
+cat packer/sonarqube/ami-id.txt
+```
+
+I recorded the other images in their corresponding ami-id.txt files. These records are evidence; Terraform's AMI data sources select available images by project and image tags.
+
+### E. Bootstrap state and update the scoped Terraform policy
+
+```bash
+AWS_PROFILE=mds-devsecops-lab AWS_REGION=us-east-1 \
+  ./scripts/bootstrap-terraform-state.sh
+
+git pull --ff-only
+
+aws iam put-role-policy \
+  --role-name project-3-terraform-apply-role \
+  --policy-name project-3-terraform-apply-policy \
+  --policy-document file://iam/terraform-github-oidc/apply-permissions.json \
+  --profile mds-devsecops-lab
+
+aws iam get-role-policy \
+  --role-name project-3-terraform-apply-role \
+  --policy-name project-3-terraform-apply-policy \
+  --profile mds-devsecops-lab \
+  --query 'PolicyDocument.Statement[].Sid' --output text
+```
+
+I configured the OIDC provider, repository variables, GitHub App credentials and protected apply environment using the setup document. Policy files contain account-specific values and must be reviewed before use in another account.
+
+### F. Deploy the prerequisite lab
+
+```bash
+gh workflow run terraform-deploy.yml --ref master
+gh run list --workflow terraform-deploy.yml --limit 5
+```
+
+I opened that run in GitHub, reviewed its saved plans and approved each pending apply. I did not run a second deployment while the first was awaiting approval.
+
+```bash
+gh api repos/DelaneKay/project-3-secure-cicd-pipeline/actions/runners \
+  --jq '.runners[] | {name,status,busy,labels:[.labels[].name]}'
+```
+
+For SSM diagnostics I used this two-command pattern. I copied the numeric instance ID from the current inventory and used the command ID returned by send-command:
+
+```bash
+aws ssm send-command \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --instance-ids i-REPLACE \
+  --document-name AWS-RunShellScript \
+  --parameters 'commands=["systemctl is-active juice-shop.service","curl --fail --silent --output /dev/null --write-out \"HTTP %{http_code}\\n\" http://127.0.0.1:3000/"]' \
+  --query 'Command.CommandId' --output text
+
+aws ssm get-command-invocation \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --command-id REPLACE_WITH_RETURNED_COMMAND_ID \
+  --instance-id i-REPLACE \
+  --query '{Status:Status,Output:StandardOutputContent,Errors:StandardErrorContent}' \
+  --output json
+```
+
+I used the SonarQube health endpoint `http://127.0.0.1:9000/api/system/status` on its instance and checked for status UP. These are read-only checks.
+
+### G. Test each scanner separately
+
+I configured the SonarQube project and protected secrets before running its analysis. I confirmed the SNS subscription through its email link. Tokens were entered through protected secret fields, never committed.
+
+I started each workflow separately, waited for its result, and checked its reports before moving on:
+
+```bash
+gh workflow run gitleaks-aws.yml --ref master
+gh run list --workflow gitleaks-aws.yml --limit 3
+
+gh workflow run sonarqube-analysis.yml --ref master
+gh run list --workflow sonarqube-analysis.yml --limit 3
+
+gh workflow run dependency-check.yml --ref master
+gh run list --workflow dependency-check.yml --limit 3
+
+gh workflow run zap-dast.yml --ref master
+gh run list --workflow zap-dast.yml --limit 3
+```
+
+For any one of those runs I used the returned numeric run ID:
+
+```bash
+gh run watch RUN_ID --exit-status
+gh run view RUN_ID
+gh run view RUN_ID --log-failed
+gh run download RUN_ID --dir ~/project-3-artifact-review/RUN_ID
+```
+
+RUN_ID is a placeholder. I replaced it with the ID from run list. Where WSL could not reach GitHub, I used the Actions page to inspect logs and download the report.
+
+Before ZAP I checked that the runner account could execute it:
+
+```bash
+aws ssm send-command \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --instance-ids i-REPLACE_WITH_CURRENT_RUNNER_ID \
+  --document-name AWS-RunShellScript \
+  --parameters 'commands=["runuser -u actions-runner -- /usr/local/bin/zap.sh -version"]' \
+  --query 'Command.CommandId' --output text
+```
+
+The ZAP workflow now discovers the running tagged Juice Shop instance itself, verifies the address is in the lab CIDR, and fails if it cannot identify exactly one target.
+
+### H. Verify CloudWatch and SNS
+
+```bash
+aws logs describe-log-streams \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --log-group-name /project-3/pipeline/scans --output json
+
+aws sns list-subscriptions-by-topic \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --topic-arn arn:aws:sns:us-east-1:273517699789:project-3-secure-cicd-pipeline-scan-findings \
+  --output json
+```
+
+I checked the email as well as the job result. An execution-failed email from an earlier run is not the successful scan's findings notification; I compared its run link.
+
+### I. Commit the work and then run the combined pipeline
+
+I used feature branches and reviewed changes before publishing:
+
+```bash
+git switch -c feat/REPLACE_WITH_CHANGE_NAME
+git status --short
+git add PATH_TO_REVIEWED_FILE
+git diff --cached --check
+git --no-pager diff --cached --stat
+git commit -m "Describe the completed change"
+git push -u origin HEAD
+gh pr create --base master --title "Describe the change" --body "Explain the change and validation"
+```
+
+After the individual workflows worked, I made them reusable and connected them in secure-pipeline.yml. I kept their separate entry points.
+
+Once that change was merged, I ran the combined workflow:
+
+```bash
+gh workflow run secure-pipeline.yml --ref master
+gh run list --workflow secure-pipeline.yml --limit 3
+gh run watch RUN_ID --exit-status
+```
+
+I reviewed and approved the pending Terraform plans in the same run. ZAP ran after deployment. The first successful combined run was 41846334576:
+
+```bash
+gh run view 41846334576
+gh run download 41846334576 --dir ~/project-3-artifact-review/41846334576
+```
+
+### J. Teardown through the protected workflow
+
+When I am ready to remove the lab, I optionally create the manual RDS backup first, verify it, then use the destroy workflow:
+
+```bash
+# Optional backup demonstration; the snapshot is billable until deleted.
+aws rds create-db-snapshot \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --db-instance-identifier project-3-sonarqube \
+  --db-snapshot-identifier project-3-manual-lab-backup
+
+aws rds wait db-snapshot-available \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --db-snapshot-identifier project-3-manual-lab-backup
+
+gh workflow run terraform-destroy.yml --ref master -f confirmation=DESTROY
+gh run list --workflow terraform-destroy.yml --limit 3
+```
+
+I approve the reviewed destroy plans. After the lab is gone and I no longer need that manual backup, I remove that specific snapshot:
+
+```bash
+aws rds delete-db-snapshot \
+  --profile mds-devsecops-lab --region us-east-1 \
+  --db-snapshot-identifier project-3-manual-lab-backup
+```
+
+AMIs, backing snapshots, bootstrap IAM and the versioned state bucket require the separate final cleanup described above. I inventory them before deleting anything and do not use a broad account-wide delete command.
+
 ## Repository guide
 
 - [Source of truth](LAB-3-SOURCE-OF-TRUTH.md) — agreed project scope and decisions.
