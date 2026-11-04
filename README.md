@@ -74,6 +74,9 @@ I did not add a container scanner, an Ansible admin node or a deployment-blockin
 
 ## Walkthrough
 
+My detailed [step-by-step command walkthrough](docs/walkthrough.md) follows the Project 2B format: execution location, commands, observed results and challenges. It also identifies historical setup commands that are missing from the available chat, so readers can distinguish preserved commands from adapted reproduction examples.
+
+
 ### 1. Prepare my workstation and AWS identity
 
 I worked in WSL and used the AWS CLI, Packer, Terraform, Git, GitHub CLI and the Session Manager plugin. I authenticated with my IAM user using short-lived credentials; I did not use the AWS root user for the lab.
