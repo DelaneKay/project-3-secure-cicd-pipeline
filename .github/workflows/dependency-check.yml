@@ -90,7 +90,7 @@ jobs:
           set -e
           if [ "$scan_status" -ne 0 ]; then
             echo "Dependency-Check failed with exit status $scan_status; exception class and analyzer frames:"
-            python3 -c 'import re,sys; text=open(sys.argv[1], errors="replace").read(); pats=[r"(?<![A-Za-z0-9_$])(?:[a-zA-Z_$][\\w$]*\\.)+[A-Za-z_$][\\w$]*(?:Exception|Error)\\b", r"(?<=at )org\\.owasp\\.dependencycheck\\.[\\w.$]+"]; matches=[]; [matches.append(m) for pat in pats for m in re.findall(pat,text) if m not in matches]; print("\\n".join(matches[:40]) if matches else "No exception class or Dependency-Check frame recorded.")' "$diagnostic_log"
+            python3 -c 'import re,sys; text=open(sys.argv[1], errors="replace").read(); pats=[r"(?<![A-Za-z0-9_$])(?:[a-zA-Z_$][\w$]*\.)+[A-Za-z_$][\w$]*(?:Exception|Error)\b", r"(?<=at )org\.owasp\.dependencycheck\.[\w.$]+"]; matches=[]; [matches.append(m) for pat in pats for m in re.findall(pat,text) if m not in matches]; print("\n".join(matches[:40]) if matches else "No exception class or Dependency-Check frame recorded.")' "$diagnostic_log"
             exit "$scan_status"
           fi
           test -s "$report/dependency-check-report.json"
