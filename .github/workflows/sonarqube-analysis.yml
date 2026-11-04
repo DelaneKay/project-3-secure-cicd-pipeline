@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/sonarqube-analysis.yml"
       - "packer/juice-shop/**"
+  workflow_call:
   workflow_dispatch:
 permissions:
   contents: read
