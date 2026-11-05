@@ -8,6 +8,10 @@ I started this project to bring together the infrastructure, security testing an
 
 I built the lab in stages. First, I prepared the images and tested the Terraform layers. I then moved routine infrastructure deployment into GitHub Actions, proved that each separate scanning workflow worked, and finally connected them through a combined workflow. I kept the separate workflows because they let me demonstrate each control and investigate one stage without rerunning the entire pipeline. The walkthrough below follows that same progression, including the problems I encountered and the commands I used to investigate them.
 
+## Lab architecture
+
+![Project 3 secure CI/CD lab architecture](docs/images/project-3-lab-architecture.svg)
+
 ## The lab scenario
 
 I used my Windows workstation with Ubuntu in WSL to prepare the repository, authenticate to AWS and run Packer. Packer created separate Ubuntu images for Juice Shop, SonarQube and the scanner runner. Terraform then deployed the network, database, logging and compute resources into AWS. I used Systems Manager for instance access and diagnostics, with no inbound SSH access to the deployed hosts.
