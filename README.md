@@ -315,7 +315,9 @@ For this lab I used my IAM user for the administrative work I was authorized to 
 
 With IAM access recovered and the active AWS identity checked, I could prepare the local tools for the image builds.
 
-I needed Packer to prepare software, services and hardening before deployment. The Session Manager plugin supports its temporary SSM tunnel without an inbound SSH rule.
+Packer is an image-building tool that creates machine images from repeatable build instructions. I used it to prepare the operating system, software, services and hardening in Amazon Machine Images (AMIs) before Terraform deployed the instances. This supported the immutable infrastructure principle I wanted to demonstrate: once a host was deployed, I treated its installed software and baseline configuration as fixed. When something needed changing, I updated the build instructions, rebuilt the AMI and replaced the instance instead of configuring it by hand after deployment.
+
+Packer does not itself prevent someone from changing a running instance; that was a practice I followed in the lab. I still used read-only checks to diagnose problems, and the baked startup code could retrieve environment-specific settings and credentials. The local Session Manager plugin let Packer tunnel its SSH connection to a temporary builder through SSM without an inbound SSH rule.
 
 I installed Packer from HashiCorp's package repository and the local Session Manager plugin. The version checks returned Packer 1.16.2 and plugin 1.2.896.0 in the recorded session. A completed installer returning to the prompt is different from a command that is still waiting.
 
