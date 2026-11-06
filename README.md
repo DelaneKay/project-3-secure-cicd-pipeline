@@ -1573,7 +1573,17 @@ The images defined what would run on each host; Terraform would now define the A
 
 I introduced Terraform to describe the AWS infrastructure surrounding the images. Separate roots made ownership, state and dependency order explicit.
 
-I created five separate root directories rather than one long Terraform file. Network owns the VPC, subnets, routes and security groups; database owns RDS; observability owns log groups and SNS; compute owns Juice Shop and the runner; sonarqube owns the SonarQube instance. At this point only network and database contained files—empty directories were not missing Git commits.
+I created five separate Terraform root directories. Each root is an independently executed configuration with its own state: **network** owns the VPC, subnets, routes and security groups; **database** owns RDS; **observability** owns log groups and SNS; **compute** owns Juice Shop and the scanner runner; and **sonarqube** owns the SonarQube instance. At this point only network and database contained files—empty directories were not missing Git commits.
+
+I made this choice to give each layer a clear responsibility and to limit the scope of routine changes. For example, I can review a change to log groups in the observability root without placing every network and database resource in the same plan. Each root has its own state key and lock, so unrelated roots can run independently where their dependencies allow it. Separate state does not isolate the resources themselves: changing or destroying a network can still affect everything that depends on it.
+
+This distinction matters as an environment grows. A single root managing thousands of resources can produce a large state, take longer to refresh and plan, and create a review with many possible changes. Its state lock can also make unrelated operations wait on the same configuration. A broad apply or a mistake in that root may affect a larger part of the environment. Dividing infrastructure into sensible ownership and lifecycle boundaries can make plans easier to review, reduce lock contention and narrow the scope of an operation. The actual performance and risk depend on the resources, provider operations and how the boundaries are designed; separate roots are not automatically faster or safer in every case.
+
+A long Terraform **file** and a large Terraform **state** are different problems. Terraform combines all `.tf` files in the same directory into one root configuration. Splitting one long file into `network.tf`, `routing.tf` and other files improves readability, but those files still share one state and one lock. Creating separate root directories with separately configured backends is what gives each layer its own state.
+
+The trade-off is coordination. Downstream roots need the correct upstream outputs, deployment order and access to the required state or published outputs. I deployed the network first, then the layers that depend on it, and allowed independent work to run in parallel where the workflow supported it. In production I would choose boundaries around ownership, access and lifecycle rather than create a separate state for every resource, and I would protect state because it can contain sensitive information.
+
+I began by creating the directories:
 
 
 ```bash
