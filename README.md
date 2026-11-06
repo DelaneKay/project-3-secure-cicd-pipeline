@@ -186,6 +186,12 @@ cd project-3-secure-cicd-pipeline
 
 ### Recover the IAM user's console password
 
+I needed to recover this password because I could not sign in to the `mds-devsecops-lab` IAM user with the console credentials available to me at that point. The browser-based `aws login` flow requires a working sign-in, so I restored the IAM user's console access before using that identity for the lab. An expired CLI session alone would not have required a password reset.
+
+I chose `aws login` for interactive work because it obtains short-lived credentials after browser authentication and the CLI manages their refresh during the login session. If those credentials are exposed, their expiry limits how long they can be used. They still need protection and the IAM identity's permissions still determine what they can do. [AWS documents the login flow](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sign-in.html).
+
+I avoided entering long-term IAM access keys into the basic `aws configure` prompt for this lab. That command writes supplied access keys to the local shared credentials file, and IAM user access keys remain valid until they are disabled, deleted or otherwise revoked. They are stored credentials, not necessarily hard-coded in source code, but they can be exposed if a local file or backup is copied or committed. `aws configure` itself also configures non-secret settings, and `aws configure sso` supports temporary credentials; the security concern is relying on long-lived keys, not the command's name. [AWS CLI configure reference](https://docs.aws.amazon.com/cli/latest/reference/configure/), [AWS IAM credential guidance](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html).
+
 In my recorded recovery, I first used the existing `root-recovery` profile. Running this command opened a browser sign-in link. I followed that link and signed in as the AWS account root user for the recovery session.
 
 ```bash
