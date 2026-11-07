@@ -1,6 +1,6 @@
 resource "aws_security_group" "packer_builder" {
   name_prefix = "${var.project_name}-packer-builder-"
-  description = "Temporary Packer AMI builders: no inbound access; HTTP and HTTPS egress only."
+  description = "Temporary Packer builders: no inbound access; HTTP and HTTPS egress only."
   vpc_id      = aws_vpc.lab.id
 
   egress {
